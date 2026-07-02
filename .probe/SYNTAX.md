@@ -1,6 +1,6 @@
 # Mojo 1.0.0b3 cheat sheet for `json-mojo`
 
-> **Version:** 1.2.0 | **Updated:** 2026-07-03
+> **Version:** 1.3.0 | **Updated:** 2026-07-03
 
 Ported from color-mojo's `.probe/SYNTAX.md` (2026-07-02, probed on `1.0.0b3.dev2026070123`); this workspace resolves `1.0.0b3.dev2026070206` — re-verify any line on first divergence. Two of the retired prototype's probe files were re-ported here (`probe_clmul.mojo`, `probe_mul128.mojo` — findings 18–19); its remaining probes (SIMD lanes, atof, bitcast, prefetch, string building) were not retained — re-derive by probing as the design needs them. Every line below is _probed_, not remembered.
 

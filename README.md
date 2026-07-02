@@ -1,6 +1,6 @@
 # json-mojo
 
-> **Version:** 1.2.0 | **Updated:** 2026-07-03
+> **Version:** 1.3.0 | **Updated:** 2026-07-03
 
 Spec-exact, SIMD-accelerated JSON for Mojo — a lazy tape engine with Python-easy verbs, zero dependencies, and a measured performance record.
 
@@ -87,7 +87,19 @@ Fourteen functions, ten types (ARCHITECTURE.md, Public Surface):
 | `load(path)` / `dump(doc, path)`                                          | File sugar — bytes reach this library's validator directly (1.1.0)                                                                    |
 | `apply_patch` / `merge_patch`                                              | RFC 6902 JSON Patch and RFC 7396 Merge Patch, over the public cursor surface (1.2.0)                                                  |
 | `ParseOptions(dialect=Dialect.JSON5)`                                      | The full JSON5 grammar — comments, trailing commas, unquoted keys, single quotes, hex, `Infinity` — `dumps` normalizes to JSON (1.2.0) |
-| `msgpack.decode(bytes)`                                                    | MessagePack → `Document` over the stable tape contract; `dumps` of the result is msgpack → JSON transcoding (1.2.0)                   |
+| `msgpack` / `bson` / `cbor` siblings                                       | Binary front-ends over the stable tape contract — each decodes to a `Document` AND encodes back (`decode` / `dumps`); `json.dumps` of any decoded document is transcoding to JSON (1.2.0–1.3.0) |
+
+### Format coverage
+
+| Format      | Decode                                | Encode                                        | Gate                                             |
+| ----------- | ------------------------------------- | --------------------------------------------- | ------------------------------------------------ |
+| JSON        | `loads` — RFC 8259, spec-exact        | `dumps` — byte-faithful re-emission           | JSONTestSuite 283/0 + 95/95 round-trip           |
+| JSON5       | `parse[dialect=JSON5]` — full grammar | `dumps` normalizes to JSON (valid JSON5)      | json5-tests 112/0                                |
+| MessagePack | `msgpack.decode` — full for JSON data | `msgpack.dumps` — smallest-width, full        | 36+5 decode / 17 encode / 36 round-trips, 0 fail |
+| BSON        | `bson.decode` — JSON-typed elements   | `bson.dumps` — int32/64+double width-selected | 15 decode / 10 encode / 15 round-trips, 0 fail   |
+| CBOR        | `cbor.decode` — incl. indefinite+f16  | `cbor.dumps` — shortest-form heads            | RFC 8949 App. A: 43/17/43, 0 fail                |
+
+Foreign types no JSON kind can hold (BSON ObjectId/datetime/binary…, CBOR byte strings/tags, msgpack bin/ext) are **rejected by name** — mapping them is a caller decision, never a silent one.
 
 Errors carry the byte offset **and** the RFC 6901 path of the failure:
 

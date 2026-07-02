@@ -1,6 +1,6 @@
 # References — Standards Governing json-mojo
 
-> **Version:** 1.2.0 | **Updated:** 2026-07-03
+> **Version:** 1.3.0 | **Updated:** 2026-07-03
 
 Vendored and linked specifications for every byte this library parses or emits, with the constraints each imposes. Entries marked _candidate_ await the design discussion; the spec facts themselves are settled.
 
@@ -50,6 +50,9 @@ Cite entries from this index in module headers rather than restating spec text.
 | ECMA-404, 2nd edition   | Ecma International | The same grammar as RFC 8259, without interoperability guidance — 8259 is the operative citation here                                                       | <https://ecma-international.org/publications-and-standards/standards/ecma-404/> |
 | IEEE 754-2019           | IEEE               | The number model interoperable JSON is limited to (binary64)                                                                                                | <https://standards.ieee.org/ieee/754/6210/>                                     |
 | JSONTestSuite           | Nicolas Seriot     | The de-facto parser conformance corpus (y/n/i cases) — clone into `references/JSONTestSuite` to run `tests/run_suite.sh` (gitignored, like all clones here) | <https://github.com/nst/JSONTestSuite>                                          |
+| RFC 8949 CBOR           | IETF (STD 94)      | The `cbor` sibling: major types, heads, indefinite lengths, Appendix A vectors seed its gate, Appendix D half-precision algorithm                            | <https://www.rfc-editor.org/rfc/rfc8949.txt>                                    |
+| BSON Specification v1.1 | bsonspec.org       | The `bson` sibling: element types, document framing, the cstring/int32-length rules its policies cite                                                        | <https://bsonspec.org/spec.html>                                                |
+| MessagePack spec        | msgpack org        | The `msgpack` sibling: the format-byte table its dispatch (and named constants) mirror                                                                       | <https://github.com/msgpack/msgpack/blob/master/spec.md>                        |
 | JSON5 (spec.json5.org)  | json5 org          | `Dialect.JSON5` (tier 1): the exact grammar the dedicated scanner implements, over ES5.1 lexical productions                                | <https://spec.json5.org/>                                                       |
 | json5-tests             | json5 org          | The JSON5 conformance corpus — clone into `references/json5-tests` for `tests/run_json5_suite.sh` (gitignored)                              | <https://github.com/json5/json5-tests>                                          |
 | RFC 9535 JSONPath       | IETF               | Query expressions over JSON — linked for scope discussion, not vendored (62 pages)                                                                          | <https://www.rfc-editor.org/rfc/rfc9535.txt>                                    |

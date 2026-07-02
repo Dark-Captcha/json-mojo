@@ -3,8 +3,9 @@
 # MessagePack decode vectors: structural cases compare `dumps` text,
 # float cases compare exact Float64 values, reject cases must raise.
 
-from json import dumps
+from json import dumps, loads
 from msgpack import decode
+from msgpack import dumps as mp_dumps
 
 
 def _unhex(hex: String) raises -> List[UInt8]:
@@ -25,11 +26,23 @@ def _nibble(c: UInt8) raises -> Int:
     return Int(c - UInt8(ord("a"))) + 10
 
 
+def _to_hex(data: List[UInt8]) -> String:
+    comptime HEX = "0123456789abcdef"
+    var hb = HEX.as_bytes()
+    var out = String("")
+    for i in range(len(data)):
+        out += chr(Int(hb[Int((data[i] >> 4) & 15)]))
+        out += chr(Int(hb[Int(data[i] & 15)]))
+    return out^
+
+
 def main() raises:
     var fails = 0
     var accepts = 0
     var floats = 0
     var rejects = 0
+    var encodes = 0
+    var roundtrips = 0
 
     try:
         var doc = decode(_unhex("2a"))
@@ -543,6 +556,676 @@ def main() raises:
         fails += 1
 
     try:
+        var edoc = loads(String("127"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "7f":
+            encodes += 1
+        else:
+            print("FAIL encode:", "127", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "127", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String("128"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "cc80":
+            encodes += 1
+        else:
+            print("FAIL encode:", "128", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "128", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String("-32"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "e0":
+            encodes += 1
+        else:
+            print("FAIL encode:", "-32", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "-32", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String("-33"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "d0df":
+            encodes += 1
+        else:
+            print("FAIL encode:", "-33", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "-33", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String("65535"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "cdffff":
+            encodes += 1
+        else:
+            print("FAIL encode:", "65535", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "65535", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String("-300"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "d1fed4":
+            encodes += 1
+        else:
+            print("FAIL encode:", "-300", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "-300", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String("4294967295"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "ceffffffff":
+            encodes += 1
+        else:
+            print("FAIL encode:", "4294967295", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "4294967295", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String("4294967296"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "d30000000100000000":
+            encodes += 1
+        else:
+            print("FAIL encode:", "4294967296", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "4294967296", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String("18446744073709551615"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "cfffffffffffffffff":
+            encodes += 1
+        else:
+            print("FAIL encode:", "18446744073709551615", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "18446744073709551615", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String("-9223372036854775808"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "d38000000000000000":
+            encodes += 1
+        else:
+            print("FAIL encode:", "-9223372036854775808", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "-9223372036854775808", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String("1.5"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "cb3ff8000000000000":
+            encodes += 1
+        else:
+            print("FAIL encode:", "1.5", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "1.5", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String('"hi"'))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "a26869":
+            encodes += 1
+        else:
+            print("FAIL encode:", '"hi"', "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", '"hi"', String(error))
+        fails += 1
+    try:
+        var edoc = loads(String("[]"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "90":
+            encodes += 1
+        else:
+            print("FAIL encode:", "[]", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "[]", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String("{}"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "80":
+            encodes += 1
+        else:
+            print("FAIL encode:", "{}", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "{}", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String("null"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "c0":
+            encodes += 1
+        else:
+            print("FAIL encode:", "null", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "null", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String("true"))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "c3":
+            encodes += 1
+        else:
+            print("FAIL encode:", "true", "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", "true", String(error))
+        fails += 1
+    try:
+        var edoc = loads(String('{"a":[1,2]}'))
+        var packed = mp_dumps(edoc)
+        var got_hex = _to_hex(packed)
+        if got_hex == "81a161920102":
+            encodes += 1
+        else:
+            print("FAIL encode:", '{"a":[1,2]}', "got", got_hex)
+            fails += 1
+    except error:
+        print("FAIL encode raised:", '{"a":[1,2]}', String(error))
+        fails += 1
+
+    try:
+        var r1 = decode(_unhex("2a"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "42":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "2a", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "2a", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("00"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "0":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "00", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "00", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("7f"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "127":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "7f", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "7f", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("ff"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "-1":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "ff", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "ff", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("e0"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "-32":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "e0", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "e0", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("c0"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "null":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "c0", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "c0", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("c2"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "false":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "c2", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "c2", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("c3"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "true":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "c3", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "c3", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("a26869"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == '"hi"':
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "a26869", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "a26869", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("a0"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == '""':
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "a0", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "a0", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("a668c3a96c6c6f"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == '"héllo"':
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "a668c3a96c6c6f", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "a668c3a96c6c6f", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("a3612262"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == '"a\\"b"':
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "a3612262", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "a3612262", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("a3615c62"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == '"a\\\\b"':
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "a3615c62", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "a3615c62", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("a66c690a6e6509"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == '"li\\nne\\t"':
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "a66c690a6e6509", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "a66c690a6e6509", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("a101"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == '"\\u0001"':
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "a101", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "a101", String(error))
+        fails += 1
+    try:
+        var r1 = decode(
+            _unhex(
+                "d9c87878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878"
+            )
+        )
+        var r2 = decode(mp_dumps(r1))
+        if (
+            dumps(r2)
+            == '"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"'
+        ):
+            roundtrips += 1
+        else:
+            print(
+                "FAIL roundtrip:",
+                "d9c87878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878",
+                "got",
+                dumps(r2),
+            )
+            fails += 1
+    except error:
+        print(
+            "FAIL roundtrip raised:",
+            "d9c87878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878",
+            String(error),
+        )
+        fails += 1
+    try:
+        var r1 = decode(
+            _unhex(
+                "da012c797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979"
+            )
+        )
+        var r2 = decode(mp_dumps(r1))
+        if (
+            dumps(r2)
+            == '"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"'
+        ):
+            roundtrips += 1
+        else:
+            print(
+                "FAIL roundtrip:",
+                "da012c797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979",
+                "got",
+                dumps(r2),
+            )
+            fails += 1
+    except error:
+        print(
+            "FAIL roundtrip raised:",
+            "da012c797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979",
+            String(error),
+        )
+        fails += 1
+    try:
+        var r1 = decode(_unhex("ccc8"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "200":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "ccc8", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "ccc8", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("cdffff"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "65535":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "cdffff", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "cdffff", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("ceffffffff"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "4294967295":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "ceffffffff", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "ceffffffff", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("cfffffffffffffffff"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "18446744073709551615":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "cfffffffffffffffff", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "cfffffffffffffffff", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("d09c"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "-100":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "d09c", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "d09c", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("d18ad0"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "-30000":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "d18ad0", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "d18ad0", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("d288ca6c00"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "-2000000000":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "d288ca6c00", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "d288ca6c00", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("d38000000000000000"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "-9223372036854775808":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "d38000000000000000", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "d38000000000000000", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("d37fffffffffffffff"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "9223372036854775807":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "d37fffffffffffffff", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "d37fffffffffffffff", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("90"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "[]":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "90", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "90", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("80"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "{}":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "80", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "80", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("9301a178c0"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == '[1,"x",null]':
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "9301a178c0", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "9301a178c0", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("82a16101a16291c3"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == '{"a":1,"b":[true]}':
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "82a16101a16291c3", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "82a16101a16291c3", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("919190"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "[[[]]]":
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "919190", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "919190", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("81a16b80"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == '{"k":{}}':
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "81a16b80", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "81a16b80", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("82a16b01a16b02"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == '{"k":1,"k":2}':
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "82a16b01a16b02", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "82a16b01a16b02", String(error))
+        fails += 1
+    try:
+        var r1 = decode(
+            _unhex("dc00140707070707070707070707070707070707070707")
+        )
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == "[7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7]":
+            roundtrips += 1
+        else:
+            print(
+                "FAIL roundtrip:",
+                "dc00140707070707070707070707070707070707070707",
+                "got",
+                dumps(r2),
+            )
+            fails += 1
+    except error:
+        print(
+            "FAIL roundtrip raised:",
+            "dc00140707070707070707070707070707070707070707",
+            String(error),
+        )
+        fails += 1
+    try:
+        var r1 = decode(_unhex("de0003a26b3000a26b3101a26b3202"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == '{"k0":0,"k1":1,"k2":2}':
+            roundtrips += 1
+        else:
+            print(
+                "FAIL roundtrip:",
+                "de0003a26b3000a26b3101a26b3202",
+                "got",
+                dumps(r2),
+            )
+            fails += 1
+    except error:
+        print(
+            "FAIL roundtrip raised:",
+            "de0003a26b3000a26b3101a26b3202",
+            String(error),
+        )
+        fails += 1
+    try:
+        var r1 = decode(
+            _unhex(
+                "91919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919190"
+            )
+        )
+        var r2 = decode(mp_dumps(r1))
+        if (
+            dumps(r2)
+            == "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]"
+        ):
+            roundtrips += 1
+        else:
+            print(
+                "FAIL roundtrip:",
+                "91919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919190",
+                "got",
+                dumps(r2),
+            )
+            fails += 1
+    except error:
+        print(
+            "FAIL roundtrip raised:",
+            "91919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919190",
+            String(error),
+        )
+        fails += 1
+
+    try:
         _ = decode(_unhex("c1"))
         print("FAIL reject accepted: 0xc1")
         fails += 1
@@ -638,6 +1321,10 @@ def main() raises:
         floats,
         " rejects=",
         rejects,
+        " encodes=",
+        encodes,
+        " roundtrips=",
+        roundtrips,
         " fails=",
         fails,
     )

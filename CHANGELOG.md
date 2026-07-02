@@ -2,6 +2,17 @@
 
 All notable changes to json-mojo. Format follows Keep a Changelog; versions follow SemVer once past 1.0.
 
+## [1.3.0] — 2026-07-03
+
+Every format, both directions: MessagePack, BSON, and CBOR all decode AND encode over the stable tape contract. (JSON5's encode story is `dumps` itself — JSON output is valid JSON5 by inclusion.)
+
+### Added
+
+- `msgpack.dumps(doc | value) -> List[UInt8]`: smallest-width integers, float64 decimals, decoded strings, count-prefixed containers; JSON5 `Infinity`/`NaN` encode as native float ±inf/nan (the formats hold what RFC 8259 text cannot — stated). Gate grew to 17 exact-byte encode vectors + 36 decode→encode→decode round-trips (0 fails).
+- The `bson` sibling package (bsonspec.org v1.1): `bson.decode` (double/string/document/array/bool/null/int32/int64; ObjectId, datetime, binary, regex, decimal128, code, timestamp, min/max keys REJECTED BY NAME; non-finite doubles rejected — JSON cannot hold them) and `bson.dumps` (object roots only — BSON's top level is a document; int32/int64/double width selection; UInt64 beyond Int64.MAX rejected by name — BSON has no unsigned 64-bit type; NUL-bearing keys rejected — names are cstrings). Gate: 15 accept / 10 exact-byte encode / 15 round-trips / 16 rejects.
+- The `cbor` sibling package (RFC 8949): `cbor.decode` (full integer ladder to ±64-bit, float16/32/64 — half-precision expanded per Appendix D, definite AND indefinite arrays/maps/text strings; byte strings, tags, `undefined`, simple values, non-finite floats, and negatives below Int64.MIN rejected by name) and `cbor.dumps` (shortest-form heads, definite lengths, float64 decimals). Gate seeded from RFC 8949 Appendix A: 43 accept / 17 exact-byte encode / 43 round-trips / 18 rejects.
+- All three binary gates run under `pixi run test` alongside the unit battery and msgpack vectors.
+
 ## [1.2.0] — 2026-07-03
 
 All three extension tiers ship their first residents.

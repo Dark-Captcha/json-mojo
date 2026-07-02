@@ -135,6 +135,40 @@ REJECT.append(
 )
 
 
+ENCODE = []  # (json_text, expected_hex) — exact smallest-width bytes
+
+
+def enc(json_text: str, packed: bytes):
+    ENCODE.append((json_text, h(packed)))
+
+
+import struct as _s
+
+enc("127", bytes([0x7F]))
+enc("128", bytes([0xCC, 128]))
+enc("-32", bytes([0xE0]))
+enc("-33", bytes([0xD0]) + _s.pack(">b", -33))
+enc("65535", bytes([0xCD]) + _s.pack(">H", 65535))
+enc("-300", bytes([0xD1]) + _s.pack(">h", -300))
+enc("4294967295", bytes([0xCE]) + _s.pack(">I", 4294967295))
+enc("4294967296", bytes([0xD3]) + _s.pack(">q", 4294967296))
+enc(
+    "18446744073709551615",
+    bytes([0xCF]) + _s.pack(">Q", 18446744073709551615),
+)
+enc(
+    "-9223372036854775808",
+    bytes([0xD3]) + _s.pack(">q", -9223372036854775808),
+)
+enc("1.5", bytes([0xCB]) + _s.pack(">d", 1.5))
+enc('"hi"', fixstr("hi"))
+enc("[]", bytes([0x90]))
+enc("{}", bytes([0x80]))
+enc("null", bytes([0xC0]))
+enc("true", bytes([0xC3]))
+enc('{"a":[1,2]}', bytes([0x81]) + fixstr("a") + bytes([0x92, 0x01, 0x02]))
+
+
 def mojo_str(s: str) -> str:
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -147,8 +181,9 @@ with open(OUT, "w") as f:
     w(
         "# float cases compare exact Float64 values, reject cases must raise.\n\n"
     )
-    w("from json import dumps\n")
-    w("from msgpack import decode\n\n\n")
+    w("from json import dumps, loads\n")
+    w("from msgpack import decode\n")
+    w("from msgpack import dumps as mp_dumps\n\n\n")
     w("def _unhex(hex: String) raises -> List[UInt8]:\n")
     w("    var out = List[UInt8](capacity=hex.byte_length() // 2)\n")
     w("    var chars = hex.as_bytes()\n")
@@ -163,11 +198,21 @@ with open(OUT, "w") as f:
     w('    if c >= UInt8(ord("0")) and c <= UInt8(ord("9")):\n')
     w('        return Int(c - UInt8(ord("0")))\n')
     w('    return Int(c - UInt8(ord("a"))) + 10\n\n\n')
+    w("def _to_hex(data: List[UInt8]) -> String:\n")
+    w('    comptime HEX = "0123456789abcdef"\n')
+    w("    var hb = HEX.as_bytes()\n")
+    w('    var out = String("")\n')
+    w("    for i in range(len(data)):\n")
+    w("        out += chr(Int(hb[Int((data[i] >> 4) & 15)]))\n")
+    w("        out += chr(Int(hb[Int(data[i] & 15)]))\n")
+    w("    return out^\n\n\n")
     w("def main() raises:\n")
     w("    var fails = 0\n")
     w("    var accepts = 0\n")
     w("    var floats = 0\n")
-    w("    var rejects = 0\n\n")
+    w("    var rejects = 0\n")
+    w("    var encodes = 0\n")
+    w("    var roundtrips = 0\n\n")
     for hex_bytes, expected in ACCEPT:
         w("    try:\n")
         w(f"        var doc = decode(_unhex({mojo_str(hex_bytes)}))\n")
@@ -199,6 +244,45 @@ with open(OUT, "w") as f:
         )
         w("        fails += 1\n")
     w("\n")
+    for json_text, expected_hex in ENCODE:
+        w("    try:\n")
+        w(f"        var edoc = loads(String({mojo_str(json_text)}))\n")
+        w("        var packed = mp_dumps(edoc)\n")
+        w("        var got_hex = _to_hex(packed)\n")
+        w(f"        if got_hex == {mojo_str(expected_hex)}:\n")
+        w("            encodes += 1\n")
+        w("        else:\n")
+        w(
+            f"            print(\"FAIL encode:\", {mojo_str(json_text)},"
+            ' "got", got_hex)\n'
+        )
+        w("            fails += 1\n")
+        w("    except error:\n")
+        w(
+            f"        print(\"FAIL encode raised:\", {mojo_str(json_text)},"
+            " String(error))\n"
+        )
+        w("        fails += 1\n")
+    w("\n")
+    for hex_bytes, expected in ACCEPT:
+        w("    try:\n")
+        w(f"        var r1 = decode(_unhex({mojo_str(hex_bytes)}))\n")
+        w("        var r2 = decode(mp_dumps(r1))\n")
+        w(f"        if dumps(r2) == {mojo_str(expected)}:\n")
+        w("            roundtrips += 1\n")
+        w("        else:\n")
+        w(
+            f"            print(\"FAIL roundtrip:\", {mojo_str(hex_bytes)},"
+            ' "got", dumps(r2))\n'
+        )
+        w("            fails += 1\n")
+        w("    except error:\n")
+        w(
+            f"        print(\"FAIL roundtrip raised:\","
+            f" {mojo_str(hex_bytes)}, String(error))\n"
+        )
+        w("        fails += 1\n")
+    w("\n")
     for hex_bytes, why in REJECT:
         w("    try:\n")
         w(f"        _ = decode(_unhex({mojo_str(hex_bytes)}))\n")
@@ -208,7 +292,8 @@ with open(OUT, "w") as f:
         w("        rejects += 1\n")
     w("\n")
     w('    print("msgpack: accepts=", accepts, " floats=", floats,')
-    w(' " rejects=", rejects, " fails=", fails)\n')
+    w(' " rejects=", rejects, " encodes=", encodes,')
+    w(' " roundtrips=", roundtrips, " fails=", fails)\n')
     w("    if fails > 0:\n")
     w('        raise Error("MSGPACK VECTORS FAILED")\n')
     w('    print("MSGPACK OK")\n')

@@ -1,6 +1,6 @@
 # Architecture — json-mojo
 
-> **Version:** 1.2.0 | **Updated:** 2026-07-03
+> **Version:** 1.3.0 | **Updated:** 2026-07-03
 
 Purpose, binding contracts, and system map of json-mojo — the criteria every structural decision in this library is judged against.
 
@@ -212,7 +212,7 @@ Grammar supersets join post-v1 as a typed field with a default that preserves ev
 | `FromJson` / `ToJson`               | The conversion protocol (Type Scheme, Layer 2)                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `Serializer`                        | What `ToJson` implementations write into — Writer-backed                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
-Twenty-seven public names in total — sixteen functions (the eight frozen at 0.1.0: `parse`, `try_parse`, `loads`, `loads_bytes`, `dumps`, `deserialize`, `try_deserialize`, `serialize`; six added at 1.1.0: `loads_lines`, `dumps_lines`, `loads_seq`, `dumps_seq`, `load`, `dump`; two at 1.2.0: `apply_patch`, `merge_patch`), eleven types (`Dialect` joined at 1.2.0). The `msgpack` sibling package adds `msgpack.decode` under its own namespace. `Member`, the yield type of `members()`, is package-public but deliberately un-exported — callers meet it through iteration, like a stdlib dict entry. File input/output sugar (`load`/`dump`) is deferred alongside JSON Lines: the primary audience holds bytes, not paths.
+Twenty-seven public names in total — sixteen functions (the eight frozen at 0.1.0: `parse`, `try_parse`, `loads`, `loads_bytes`, `dumps`, `deserialize`, `try_deserialize`, `serialize`; six added at 1.1.0: `loads_lines`, `dumps_lines`, `loads_seq`, `dumps_seq`, `load`, `dump`; two at 1.2.0: `apply_patch`, `merge_patch`), eleven types (`Dialect` joined at 1.2.0). The `msgpack`, `bson`, and `cbor` sibling packages each add `decode` and `dumps` under their own namespaces — every binary format is bidirectional over the tape contract as of 1.3.0. `Member`, the yield type of `members()`, is package-public but deliberately un-exported — callers meet it through iteration, like a stdlib dict entry. File input/output sugar (`load`/`dump`) is deferred alongside JSON Lines: the primary audience holds bytes, not paths.
 
 ### Decisions This Surface Settles
 

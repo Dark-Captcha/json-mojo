@@ -1,6 +1,6 @@
 # PERF — json-mojo Performance Record
 
-> **Version:** 1.2.0 | **Updated:** 2026-07-03
+> **Version:** 1.3.0 | **Updated:** 2026-07-03
 
 The measured scorecard the Performance Promise (ARCHITECTURE.md) is judged by: corpus and micro throughput versus the incumbents, where parse time goes, how throughput scales across cores, and the named weaknesses — no silent wins.
 
