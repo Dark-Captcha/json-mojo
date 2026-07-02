@@ -264,12 +264,16 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
         """Convert this value to `T` — the one generic gateway (Type Scheme,
         Layer 2): a `FromJson` conformance when declared, the reflection
         field walk otherwise. There is no container arm: List/Dict reading
-        is blocked by three probed toolchain walls (.probe/SYNTAX.md,
-        findings 21–23) — the typed container read path is the cursor walk
+        is blocked by a compiler ICE on cross-module conformance queries
+        (finding 36 — the ownership wall itself fell, mechanism retained in
+        .probe/) — the typed container read path is the cursor walk
         (`elements()` / `members()`). The bound stays loose so trait-typed
         references (the field walk's downcasts) satisfy it."""
         comptime if conforms_to(T, FromJson):
-            return downcast[T, FromJson].from_json(self)
+            # Direct static call — the comptime-if condition is the bound
+            # evidence (findings 24/35); `downcast` here ICEs the compiler
+            # on extension conformances with bodies (finding 36 notes).
+            return T.from_json(self)
         else:
             return default_from_json[T](self)
 
@@ -606,12 +610,11 @@ __extension String(FromJson):
         result = value._read_string()
 
 
-# `Optional` conforms here (no state is live across its raising calls);
-# `List` and `Dict` reading is a documented v1 limitation on this toolchain:
-# an `__extension` body that ACCUMULATES across raising calls fails the
-# ownership checker on the generic archetype (unwind cannot destroy
-# non-`ImplicitlyDeletable` elements — probed exhaustively). The read path
-# for containers is the cursor: `elements()` / `members()`.
+# `Optional` conforms directly (no state is live across its raising calls).
+# `List` and `Dict` accumulate across raising calls — the v1 wall — which the
+# ownership checker now permits when the raise path explicitly consumes the
+# partial container via `destroy_with` and comptime asserts supply the
+# element evidence (SYNTAX.md, finding 36).
 
 
 __extension Optional(FromJson):
@@ -623,6 +626,16 @@ __extension Optional(FromJson):
             result = Self(None)
         else:
             result = Self(value.to[downcast[Self.T, _ConvertBase]]())
+
+
+# `List` and `Dict` reading: the ownership wall fell (finding 36 — an
+# accumulating raising body is legal when the raise path consumes the partial
+# container via `destroy_with`, with comptime-assert element evidence; probed
+# in `.probe/probe_container_walls.mojo`), but re-landing is blocked by a
+# compiler ICE on this pin: a CROSS-MODULE `conforms_to(List[X], FromJson)`
+# query crashes decl-body resolution of the extension (the same query against
+# `ToJson` is fine — serialization works). Re-attempt each nightly; until
+# then the typed container read path remains the cursor walk.
 
 
 __extension SIMD(FromJson):

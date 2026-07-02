@@ -1,6 +1,6 @@
 # json-mojo
 
-> **Version:** 0.1.0 | **Updated:** 2026-07-02
+> **Version:** 1.1.0 | **Updated:** 2026-07-03
 
 Spec-exact, SIMD-accelerated JSON for Mojo — a lazy tape engine with Python-easy verbs, zero dependencies, and a measured performance record.
 
@@ -71,7 +71,7 @@ Pure Mojo — no C toolchain, no FFI, no transitive native dependencies.
 
 ## Surface
 
-Eight functions, ten types (ARCHITECTURE.md, Public Surface):
+Fourteen functions, ten types (ARCHITECTURE.md, Public Surface):
 
 | Name                                                                      | Purpose                                                                                                                               |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -83,6 +83,8 @@ Eight functions, ten types (ARCHITECTURE.md, Public Surface):
 | `Value` / `ValueKind`                                                     | The lazy cursor: `kind()`, `to[T]()`, `["key"]` / `[index]`, `elements()`, `members()`, `at("/pointer")`, `fits_int64/uint64/float64` |
 | `ParseOptions` / `ParseMode` / `DuplicatePolicy` / `SerializeOptions`     | Comptime policy knobs — each combination compiles its own specialized parser                                                          |
 | `FromJson` / `ToJson` / `Serializer`                                      | The conversion protocol, for custom control                                                                                           |
+| `loads_lines` / `dumps_lines` / `loads_seq` / `dumps_seq`                 | JSON Lines (NDJSON) and RFC 7464 text sequences — one `Document` per record, errors name the record (1.1.0)                           |
+| `load(path)` / `dump(doc, path)`                                          | File sugar — bytes reach this library's validator directly (1.1.0)                                                                    |
 
 Errors carry the byte offset **and** the RFC 6901 path of the failure:
 
@@ -105,7 +107,7 @@ Every release re-earns all of it (commands in PERF.md, Reproducing):
 | Structural fuzz                             | 400/400 byte-exact round-trips; 350/350 hostile inputs without a crash        |
 | UTF-8 differential (strict RFC 3629 oracle) | 424 / 424                                                                     |
 | `dumps ∘ loads` idempotence                 | 95/95 corpus files, byte-exact (part of the suite gate's RESULT line)         |
-| Unit battery                                | 34 / 34                                                                       |
+| Unit battery                                | 36 / 36                                                                       |
 
 ---
 
@@ -115,7 +117,8 @@ Full record with conditions, protocols, and weaknesses in PERF.md. Headlines (AM
 
 | Measure                                | Result                                                               |
 | -------------------------------------- | -------------------------------------------------------------------- |
-| Corpus parse (twitter / citm / canada) | 0.72–1.29 GB/s — **2.0–2.7× EmberJson** measured on the same machine |
+| Corpus parse (twitter / citm / canada) | 0.82–1.29 GB/s — **1.8–2.9× EmberJson** measured on the same machine |
+| vs C++ simdjson (same-machine ceiling) | canada at **58%** of the reference; twitter/citm at 14–19% — the named frontier (PERF.md) |
 | Corpus dumps                           | 2.3–8.3 GB/s (raw-span re-emission)                                  |
 | Giant-string parse                     | up to 20 GB/s (SIMD skip + lazy per-body UTF-8)                      |
 | 32-worker aggregate                    | ~15 GB/s parse throughput                                            |
@@ -128,7 +131,7 @@ Stated, not hidden:
 
 | Limit                                                   | Detail                                                                                                                                                                                               |
 | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `deserialize[List[T]]` / `deserialize[Dict[String, V]]` | Blocked by three probed toolchain walls (`.probe/SYNTAX.md`, findings 21–23); the typed container read path is the cursor walk (`elements()` / `members()`). Container **serialization** works fully |
+| `deserialize[List[T]]` / `deserialize[Dict[String, V]]` | The ownership wall fell (finding 36 — working mechanism retained in `.probe/`), but a compiler ICE on cross-module conformance queries blocks re-landing on this pin; the typed container read path is the cursor walk (`elements()` / `members()`). Container **serialization** works fully |
 | Struct derivation contract                              | Be `Defaultable`, or have only trivially-destructible fields                                                                                                                                         |
 | Streaming / JSON Lines                                  | Deferred — a fast-follow, not a v1 blocker (ARCHITECTURE.md, Non-Goals)                                                                                                                              |
 | Platform                                                | linux-64 developed and measured; portable SIMD by construction                                                                                                                                       |
@@ -142,7 +145,7 @@ Stated, not hidden:
 | ARCHITECTURE.md      | Purpose, contracts, type scheme, public surface, system map                |
 | PERF.md              | The measured record: scorecards, stage breakdown, scaling, weaknesses      |
 | references/README.md | The standards map — five vendored RFCs and the constraints drawn from each |
-| .probe/SYNTAX.md     | 35 verified toolchain findings this library is built on                    |
+| .probe/SYNTAX.md     | 36 verified toolchain findings this library is built on                    |
 
 ---
 

@@ -1,6 +1,6 @@
 # Architecture — json-mojo
 
-> **Version:** 0.1.0 | **Updated:** 2026-07-02
+> **Version:** 1.1.0 | **Updated:** 2026-07-03
 
 Purpose, binding contracts, and system map of json-mojo — the criteria every structural decision in this library is judged against.
 
@@ -118,7 +118,7 @@ RFC 8259 defines exactly six kinds; the tape alphabet is those six tags and neve
 | `array`   | Tag plus a skip-link to the container's end — lean tape, forward iteration is the cheap direction                                                                                                                                                   |
 | `object`  | Tag plus a skip-link to the container's end — member lookup scans forward and early-exits, honoring the parse-time duplicate policy (members shadowed under `last_wins` are invisible to lookup, iteration, `len`, and `dumps`)                     |
 
-Spans-until-asked is also the lazy architecture the Performance Promise forces — this layer _is_ the On-Demand design. Typed deserialization and the serializer are both consumers of the same tape; a second parser never exists. The entry layout above — uniform two-word records, `[tag:8 | flags:8 | a:48][b:64]` — is the **stable contract of extension tier 2**: a future binary front-end emits this tape and inherits every consumer unchanged.
+Spans-until-asked is also the lazy architecture the Performance Promise forces — this layer _is_ the On-Demand design. Typed deserialization and the serializer are both consumers of the same tape; a second parser never exists. The entry layout above — uniform two-word records, `[tag:8 | flags:8 | a:48][b:64]` — is the **stable contract of extension tier 2**: a future binary front-end emits this tape and inherits every consumer unchanged (`FLAG_ARENA` is reserved for exactly that — spans pointing into a decoder-owned side arena, since binary numbers have no digit text in the input).
 
 ### Layer 2 — The Protocol
 
@@ -133,7 +133,7 @@ value.to[Float64]()    # to the FromJson conformance of the target
 value.to[MyStruct]()   # structs derive via reflection — no conformance
 ```
 
-The honest mechanics under the gateway, settled by probes (`.probe/SYNTAX.md`, findings 20–35): `__extension` retroactive conformance EXISTS on this toolchain, so primitives (`Bool`, `String`, every SIMD scalar width) and `Optional` conform to `FromJson` directly, and all containers conform to `ToJson`. Two toolchain limits shape the rest: extensions must live in the trait's own module, and an extension body that accumulates a container across raising calls fails the ownership checker on generic archetypes — so `List`/`Dict` **deserialization** is a recorded v1 limitation (the typed read path for them is the cursor walk: `elements()` / `members()`), while their serialization works fully. Plain structs need no conformance at all in either direction — `to[T]`, `deserialize[T]`, and `serialize` derive them through the reflection field walk; conforming to a trait is only for custom control.
+The honest mechanics under the gateway, settled by probes (`.probe/SYNTAX.md`, findings 20–36): `__extension` retroactive conformance EXISTS on this toolchain, so primitives (`Bool`, `String`, every SIMD scalar width) and `Optional` conform to `FromJson` directly, and all containers conform to `ToJson`. Two toolchain limits shape the rest: extensions must live in the trait's own module, and `List`/`Dict` **deserialization** remains a recorded limitation — the ownership wall itself fell (finding 36: an accumulating raising body is legal when the raise path consumes the partial container via `destroy_with`; the working implementation is retained in `.probe/probe_container_walls.mojo`), but re-landing is blocked by a compiler ICE on cross-module `conforms_to(List[X], FromJson)` queries on this pin, re-attempted each nightly. The typed read path for containers is the cursor walk (`elements()` / `members()`); their serialization works fully. Plain structs need no conformance at all in either direction — `to[T]`, `deserialize[T]`, and `serialize` derive them through the reflection field walk; conforming to a trait is only for custom control.
 
 Numbers get one honest introspection surface instead of guesswork: `kind()`, plus — for numbers — whether the value fits `Int64`, fits `UInt64`, converts to a finite `Float64` (IEEE 754 round-to-even — overflow is the only refusal), or exceeds all three; the raw span is always available.
 
@@ -169,6 +169,14 @@ def dumps[options: SerializeOptions = SerializeOptions()](value) raises -> Strin
 def deserialize[T](text) raises -> T     # typed serde — never materializes a DOM
 def try_deserialize[T](text) -> Optional[T]
 def serialize[T](value) raises -> String
+
+# 1.1.0, additive: whole documents in and out (engine-neutral composition)
+def loads_lines(var text) raises -> List[Document]   # JSON Lines / NDJSON
+def dumps_lines(docs) raises -> String
+def loads_seq(var text) raises -> List[Document]     # RFC 7464 text sequences
+def dumps_seq(docs) raises -> String
+def load(path) raises -> Document                    # file sugar
+def dump(doc, path) raises
 ```
 
 (`loads_bytes` is a recorded freeze amendment: the fuzz layer requires a bytes
@@ -199,7 +207,7 @@ Grammar supersets join post-v1 as a typed field with a default that preserves ev
 | `FromJson` / `ToJson`               | The conversion protocol (Type Scheme, Layer 2)                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `Serializer`                        | What `ToJson` implementations write into — Writer-backed                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
-Eighteen public names in total — eight functions (`parse`, `try_parse`, `loads`, `loads_bytes`, `dumps`, `deserialize`, `try_deserialize`, `serialize`), ten types. `Member`, the yield type of `members()`, is package-public but deliberately un-exported — callers meet it through iteration, like a stdlib dict entry. File input/output sugar (`load`/`dump`) is deferred alongside JSON Lines: the primary audience holds bytes, not paths.
+Twenty-four public names in total — fourteen functions (the eight frozen at 0.1.0: `parse`, `try_parse`, `loads`, `loads_bytes`, `dumps`, `deserialize`, `try_deserialize`, `serialize`; six added additively at 1.1.0: `loads_lines`, `dumps_lines`, `loads_seq`, `dumps_seq`, `load`, `dump`), ten types. `Member`, the yield type of `members()`, is package-public but deliberately un-exported — callers meet it through iteration, like a stdlib dict entry. File input/output sugar (`load`/`dump`) is deferred alongside JSON Lines: the primary audience holds bytes, not paths.
 
 ### Decisions This Surface Settles
 
@@ -249,7 +257,7 @@ Non-goals are rulings on the v1 core, not locked doors. Each class of exclusion 
 
 ## Open Decisions
 
-None. Every design question raised in this document has been settled by ruling or resolved by probe — the record lives in `.probe/SYNTAX.md` (findings 13–19 from the probe phase; findings 20–35 taught by the compiler during the build, including the `__extension` rules that shaped Layer 2's final form).
+None. Every design question raised in this document has been settled by ruling or resolved by probe — the record lives in `.probe/SYNTAX.md` (findings 13–19 from the probe phase; findings 20–36 taught by the compiler during the build, including the `__extension` rules that shaped Layer 2's final form).
 
 ---
 
@@ -268,6 +276,7 @@ json/
 ├── document.mojo        # Document + parse / try_parse / loads / loads_bytes
 ├── value.mojo           # Value, ValueKind, Member, iterators, FromJson + conformances,
 │                        #   the to[T] gateway, the reflection read walk
+├── io.mojo              # JSON Lines, RFC 7464 sequences, load/dump file sugar
 ├── serde.mojo           # ToJson + conformances, deserialize / try_deserialize / serialize
 ├── serializer.mojo      # Serializer + dumps (iterative tape re-emission) + SIMD escaping
 └── _internal/
@@ -286,7 +295,7 @@ Dependency direction — imports point down, with one deliberate upward edge out
 
 ```text
 __init__ ──→ { document, options, serde, serializer, value }
-serde ──→ { document, options, serializer, value }
+serde ──→ { document, options, serializer, value }     io ──→ { document, serializer }
 document ──→ { options, value, _internal/{simd, stage_one, tape} }
 serializer ──→ { document, options, value, _internal/{bytes, number, tape, writer} }
 value ──→ _internal/{number, tape, unicode}

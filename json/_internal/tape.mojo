@@ -43,6 +43,11 @@ comptime TAG_OBJECT: UInt8 = UInt8(5)
 
 comptime FLAG_ESCAPED: UInt8 = UInt8(1)
 comptime FLAG_SHADOWED: UInt8 = UInt8(2)
+# Reserved (tier-2 contract, unset by this parser): marks a span that points
+# into a decoder-owned side arena rather than the input — binary front-ends
+# (MessagePack/CBOR/BSON) materialize number text there (ARCHITECTURE.md,
+# extension tiers; ROADMAP.md).
+comptime FLAG_ARENA: UInt8 = UInt8(4)
 
 comptime _A_MASK: UInt64 = (UInt64(1) << 48) - 1
 
@@ -149,8 +154,31 @@ def _is_whitespace(byte: UInt8) -> Bool:
     )
 
 
+@always_inline
+def _digit_run_end(bytes: Span[UInt8, _], start: Int, end: Int) -> Int:
+    """First index in [start, end) that is not an ASCII digit — hopping 16
+    bytes per step. The 64-byte input tail padding makes every load legal;
+    the clamp to `end` guards against padding bytes that happen to be
+    digits when a number ends the document."""
+    comptime W = 16
+    var ptr = bytes.unsafe_ptr()
+    var i = start
+    while i < end:
+        var chunk = ptr.load[width=W](i)
+        var is_digit = chunk.ge(UInt8(ord("0"))) & chunk.le(UInt8(ord("9")))
+        var mask = pack_bits(is_digit)
+        var run = Int(count_trailing_zeros(~UInt64(mask)))
+        if run < W:
+            i += run
+            return min(i, end)
+        i += W
+    return end
+
+
 def _validate_number(bytes: Span[UInt8, _], start: Int, end: Int) raises:
-    """RFC 8259 §6: -?(0|[1-9]digits)(.digits)?([eE][+-]?digits)?"""
+    """RFC 8259 §6: -?(0|[1-9]digits)(.digits)?([eE][+-]?digits)?
+    Digit runs — the dominant bytes of number-heavy documents — advance via
+    the SIMD hop above instead of per-byte compares."""
     var i = start
     if i < end and bytes[i] == UInt8(ord("-")):
         i += 1
@@ -159,24 +187,14 @@ def _validate_number(bytes: Span[UInt8, _], start: Int, end: Int) raises:
     if bytes[i] == UInt8(ord("0")):
         i += 1
     elif bytes[i] >= UInt8(ord("1")) and bytes[i] <= UInt8(ord("9")):
-        while (
-            i < end
-            and bytes[i] >= UInt8(ord("0"))
-            and bytes[i] <= UInt8(ord("9"))
-        ):
-            i += 1
+        i = _digit_run_end(bytes, i + 1, end)
     else:
         _error("number has an invalid leading digit", i)
     if i < end and bytes[i] == UInt8(ord(".")):
         i += 1
         if i >= end or bytes[i] < UInt8(ord("0")) or bytes[i] > UInt8(ord("9")):
             _error("number has a bare decimal point", i)
-        while (
-            i < end
-            and bytes[i] >= UInt8(ord("0"))
-            and bytes[i] <= UInt8(ord("9"))
-        ):
-            i += 1
+        i = _digit_run_end(bytes, i + 1, end)
     if i < end and (bytes[i] == UInt8(ord("e")) or bytes[i] == UInt8(ord("E"))):
         i += 1
         if i < end and (
@@ -185,12 +203,7 @@ def _validate_number(bytes: Span[UInt8, _], start: Int, end: Int) raises:
             i += 1
         if i >= end or bytes[i] < UInt8(ord("0")) or bytes[i] > UInt8(ord("9")):
             _error("number has an empty exponent", i)
-        while (
-            i < end
-            and bytes[i] >= UInt8(ord("0"))
-            and bytes[i] <= UInt8(ord("9"))
-        ):
-            i += 1
+        i = _digit_run_end(bytes, i + 1, end)
     if i != end:
         _error("number has trailing characters", i)
 

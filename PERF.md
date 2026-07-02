@@ -1,6 +1,6 @@
 # PERF — json-mojo Performance Record
 
-> **Version:** 0.1.0 | **Updated:** 2026-07-02
+> **Version:** 1.1.0 | **Updated:** 2026-07-03
 
 The measured scorecard the Performance Promise (ARCHITECTURE.md) is judged by: corpus and micro throughput versus the incumbents, where parse time goes, how throughput scales across cores, and the named weaknesses — no silent wins.
 
@@ -29,7 +29,7 @@ The measured scorecard the Performance Promise (ARCHITECTURE.md) is judged by: c
 | Protocol         | Min-of-N wall time via `perf_counter_ns`; the input copy feeding move-in ownership is inside the clock for micro cells (matching the prototype's accounting) and outside for corpus cells. Cells under ~100 B discretize on timer granularity — their best-of quantizes to a few nanosecond ticks |
 | Corpus           | `twitter.json` (632 KB), `citm_catalog.json` (1.7 MB), `canada.json` (2.2 MB) — the exact bytes in the EmberJson clone, so both libraries measure identical input                                                                                                                                 |
 | Variance         | Numbers are reported as observed ranges where runs disagree: absolute throughput drifted up to ~10% across this session (boost/thermal state — the untouched `dumps` path moved with it). Comparisons within one run are exact                                                                    |
-| Correctness gate | Every number below was taken with all gates green: 34/34 unit, JSONTestSuite 283/0 with 95/95 `dumps ∘ loads` round-trip, float differential 1,500/0, fuzz 750/0, UTF-8 differential 424/0                                                                                                        |
+| Correctness gate | Every number below was taken with all gates green: 36/36 unit, JSONTestSuite 283/0 with 95/95 `dumps ∘ loads` round-trip, float differential 1,500/0, fuzz 750/0, UTF-8 differential 424/0                                                                                                        |
 
 ---
 
@@ -39,9 +39,11 @@ json-mojo measured under this repository's pin; EmberJson measured **on the same
 
 | Corpus  | json-mojo parse | EmberJson parse | Ratio        | json-mojo dumps | EmberJson stringify |
 | ------- | --------------- | --------------- | ------------ | --------------- | ------------------- |
-| twitter | 0.86–0.97 GB/s  | 0.40 GB/s       | **2.1–2.4×** | 5.5 GB/s        | not captured        |
-| citm    | 1.23–1.29 GB/s  | 0.61 GB/s       | **2.0–2.1×** | 7.6–8.3 GB/s    | not captured        |
-| canada  | 0.72–0.80 GB/s  | 0.30 GB/s       | **2.4–2.7×** | 2.3–2.6 GB/s    | 0.40 GB/s (**~6×**) |
+| twitter | 0.82–0.97 GB/s  | 0.40 GB/s       | **2.0–2.4×** | 5.0–5.5 GB/s    | not captured        |
+| citm    | 1.11–1.29 GB/s  | 0.61 GB/s       | **1.8–2.1×** | 7.1–8.3 GB/s    | not captured        |
+| canada  | 0.86–0.88 GB/s  | 0.30 GB/s       | **2.9×**     | 2.3–2.6 GB/s    | 0.40 GB/s (**~6×**) |
+
+1.1.0 re-measure: canada rose from 0.72–0.80 to **0.86–0.88 GB/s** — the SIMD digit-run scan in number validation — in a session where the machine sat at the LOW end of its recorded state (the twitter/citm control cells landed at their range bottoms). The twitter/citm spans above merge both sessions' observations.
 
 Like-for-like caveats, stated: EmberJson's parse builds its eager DOM (numbers converted at parse); json-mojo's parse builds the lazy tape (numbers converted at access — the float differential suite prices that conversion at 1,500/1,500 bit-exact). These are each library's user-facing parse verb. On canada, the eager/lazy difference favors the lazy design by construction.
 
@@ -51,8 +53,8 @@ Other incumbents:
 
 | Incumbent      | Standing                              | Status here                                                                                                                                                                 |
 | -------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ehsanmok/json  | ~1.06 GB/s twitter parse (its README) | Unverifiable: does not compile on this nightly, and the prototype's own record says the same in its era. Our 0.86–0.97 sits below that published claim — a real open target |
-| simdjson (C++) | multi-GB/s reference class            | Not yet measured on this machine — roadmap item                                                                                                                             |
+| ehsanmok/json  | ~1.06 GB/s twitter parse (its README) | Still unverifiable: re-attempted 2026-07-03 on this pin — its stage 1 fails SIMD width inference (`_classify_chunk`, unresolved `W`). The published claim remains an open same-machine target |
+| simdjson (C++) | multi-GB/s reference class            | **Measured** (same machine, gcc 16.1.1 `-O3 -march=native`, latest single-header release, DOM parse, min-of-N — `benchmarks/simdjson_bench.cpp`): twitter **5.9–6.0 GB/s**, citm **5.8–6.0**, canada **1.49–1.53**. json-mojo stands at 14% / 19% / **58%** of that ceiling — the structural-corpora gap is the roadmap                                                                                                                             |
 
 ---
 
@@ -125,6 +127,7 @@ Reading: near-linear to 4 workers (compute-bound; no allocator or lock collapse 
 | Lazy per-body UTF-8 validation                                             | RFC 8259's grammar confines non-ASCII to string bodies; ASCII documents pay zero validation                                                                                              |
 | SIMD string validation + in-string block skip (the optimization pass)      | str_huge parse 1,955 → 19,983 MB/s (10.2×), str_heavy 4.4×, twitter +12% — with every correctness gate unchanged                                                                         |
 | Iterative dumps walker, innermost frame cached in locals (audit hardening) | Depth-unbounded serialization — no native stack, symmetric with the parser's bomb defense — measured neutral-to-faster (str_heavy dump best +20% over the recursive emitter it replaced) |
+| SIMD digit-run scanning in number validation (1.1.0)                       | Digit runs hop 16 bytes per step instead of per-byte compares; canada parse 0.72–0.80 → 0.86–0.88 GB/s, now 58% of the C++ simdjson ceiling on that corpus                               |
 | Eisel-Lemire in, two-digit-table integers out, stack-buffered chunk writer | Bit-exact floats (1,500/0 differential); each output byte copied exactly once                                                                                                            |
 | Monomorphized comptime options                                             | Policy knobs cost zero runtime branches                                                                                                                                                  |
 
@@ -134,10 +137,10 @@ Reading: near-linear to 4 workers (compute-bound; no allocator or lock collapse 
 
 | #   | Weakness (measured)                                                                             | Attack                                                                                                                                                                  |
 | --- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Stage 2 is 82–94% of parse; canada's per-character number validation is the single hottest loop | SIMD digit-run scanning in `_validate_number`; exact-size tape reserve + unsafe writes (two `List.append`s per value today); stage-1 atom hints to stop gap re-scanning |
+| 1   | Stage 2 is 82–94% of parse; the structural corpora sit at 14–19% of the measured simdjson ceiling | Stage-1 atom hints to stop gap re-scanning; tape-append fast path (capacity is already exact-bounded — the growth branch remains); close the string/key machinery gap |
 | 2   | str_huge parse trails EmberJson by 13%; str_heavy parse trails the prototype's claim by ~10%    | The eager-validation price; acceptable, revisit only after weakness 1                                                                                                   |
-| 3   | ehsanmok's published 1.06 GB/s twitter claim stands above us, unverifiable                      | Close it via weakness 1; re-attempt their build on future nightlies                                                                                                     |
-| 4   | simdjson itself is unmeasured on this machine                                                   | Build and run the C++ reference for the honest ceiling                                                                                                                  |
+| 3   | ehsanmok's published 1.06 GB/s twitter claim stands above our 0.82–0.97, unverifiable           | 2026-07-03 re-attempt still fails to compile; close via weakness 1, retry each nightly                                                                                  |
+| 4   | canada stands at 58% of the simdjson ceiling despite the digit-run win                          | The number-heavy residue: validate-then-reparse overlap — candidate is stage-2 emitting digit-run hints the access-time Eisel-Lemire path can reuse                     |
 | 5   | Scaling knee at 8 workers                                                                       | Topology, not code (untouched dumps moves identically); NUMA/CCD pinning experiments post-v1                                                                            |
 
 ---
@@ -155,7 +158,7 @@ The retired prototype's PERF scorecard was audited on demand. Verdict: **honest.
 git clone https://github.com/nst/JSONTestSuite references/JSONTestSuite
 git clone https://github.com/bgreni/EmberJson  references/EmberJson   # corpus + head-to-head
 
-pixi run test                          # 34 unit tests
+pixi run test                          # 36 unit tests
 bash tests/run_suite.sh                # JSONTestSuite: 283 must-pass / 0 failures,
                                        #   plus the 95/95 dumps∘loads round-trip gate
 python3 tests/gen_float_fuzz.py && pixi run mojo run -I . tests/floatdiff_generated.mojo
@@ -168,6 +171,12 @@ pixi run format                        # generators emit raw source; formatting 
 pixi run mojo build -I . -D ASSERT=none benchmarks/run_benchmarks.mojo -o .build/bench   && .build/bench
 pixi run mojo build -I . -D ASSERT=none benchmarks/micro.mojo          -o .build/micro   && .build/micro
 pixi run mojo build -I . -D ASSERT=none benchmarks/scaling.mojo        -o .build/scaling && .build/scaling
+
+# C++ simdjson ceiling (single-header release; harness pinned in-repo):
+curl -sL -o .build/simdjson.h   https://github.com/simdjson/simdjson/releases/latest/download/simdjson.h
+curl -sL -o .build/simdjson.cpp https://github.com/simdjson/simdjson/releases/latest/download/simdjson.cpp
+g++ -O3 -march=native -std=c++17 -o .build/simdjson_bench benchmarks/simdjson_bench.cpp .build/simdjson.cpp -I .build
+.build/simdjson_bench
 
 # EmberJson head-to-head, run under ITS own pin inside the clone:
 cp benchmarks/emberjson_micro_audit.mojo references/EmberJson/

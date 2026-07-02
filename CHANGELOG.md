@@ -2,6 +2,27 @@
 
 All notable changes to json-mojo. Format follows Keep a Changelog; versions follow SemVer once past 1.0.
 
+## [1.1.0] — 2026-07-03
+
+### Added
+
+- JSON Lines (NDJSON): `loads_lines` / `dumps_lines` — one `Document` per record, blank lines skipped, errors carry the 1-based line on top of the engine's byte offset and path.
+- RFC 7464 text sequences: `loads_seq` / `dumps_seq` (`RS json LF` framing; non-blank preamble rejected).
+- File sugar: `load(path)` / `dump(doc, path)` — bytes reach this library's validator directly.
+- `benchmarks/simdjson_bench.cpp`: the C++ simdjson ceiling harness; the same-machine measurement now lives in PERF.md (twitter 5.9–6.0 GB/s, citm 5.8–6.0, canada 1.49–1.53).
+- Tape contract: `FLAG_ARENA` reserved for binary front-end side-arena spans (extension tier 2).
+
+### Performance
+
+- SIMD digit-run scanning in number validation: canada.json parse 0.72–0.80 → **0.86–0.88 GB/s** (58% of the measured C++ simdjson ceiling on that corpus), every correctness gate unchanged.
+
+### Findings
+
+- The container-deserialization ownership wall fell (`.probe/SYNTAX.md`, finding 36): an accumulating raising extension body is legal when the raise path consumes the partial container via `destroy_with` — the working `List`/`Dict` implementation is retained in `.probe/probe_container_walls.mojo`. Re-landing is blocked by a compiler ICE on cross-module `conforms_to(List[X], FromJson)` queries on this pin; re-attempted each nightly.
+- ehsanmok/json re-attempted on this pin: still fails to compile (stage-1 SIMD width inference), its published claim still unverifiable.
+
+The public surface grew additively to fourteen functions + ten types; everything frozen at 0.1.0 is unchanged.
+
 ## [0.1.0] — 2026-07-02
 
 Ground-up rewrite of the retired prototype; nothing was carried forward unverified.

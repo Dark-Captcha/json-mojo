@@ -23,6 +23,7 @@ from json._internal.writer import ChunkWriter
 # The serde battery imports through the package surface — it doubles as the
 # __init__ re-export test.
 from json import deserialize, serialize, try_deserialize, FromJson, ToJson
+from json import dump, dumps_lines, dumps_seq, load, loads_lines, loads_seq
 from json.document import loads, parse, try_parse
 from json.options import (
     DuplicatePolicy,
@@ -716,9 +717,10 @@ def test_serde_containers() raises:
     nested.append(inner^)
     _assert(serialize(nested) == "[[7]]", "containers compose recursively")
 
-    # Container DESERIALIZATION is a documented v1 limitation on this
-    # toolchain (three probed walls — see serde.mojo header). The supported
-    # read path is the cursor: elements()/members() walks stay fully typed.
+    # Container DESERIALIZATION stays a documented limitation on this pin:
+    # the ownership wall fell (finding 36, probe retained), but a compiler
+    # ICE on cross-module conforms_to(List, FromJson) blocks re-landing.
+    # The supported read path is the cursor: elements()/members().
     var doc = loads("[1,2,3]")
     var total = Int64(0)
     for element in doc.elements():
@@ -727,6 +729,58 @@ def test_serde_containers() raises:
 
     var bad = try_deserialize[ToolCall]('{"name":')
     _assert(not Bool(bad), "try_deserialize returns None on parse failure")
+
+
+def test_json_lines_and_sequences() raises:
+    # NDJSON: LF and CRLF delimiters, blank lines skipped.
+    var docs = loads_lines(String('{"a":1}\r\n\n[1,2]\n"x"'))
+    _assert(len(docs) == 3, "three records parse")
+    _assert(docs[0]["a"].to[Int64]() == 1, "first line reads")
+    _assert(docs[1][1].to[Int64]() == 2, "second line reads")
+    _assert(docs[2].to[String]() == "x", "unterminated final line reads")
+
+    var lines = dumps_lines(docs)
+    _assert(lines == '{"a":1}\n[1,2]\n"x"\n', "dumps_lines frames compactly")
+    var back = loads_lines(lines.copy())
+    _assert(
+        len(back) == 3 and dumps_lines(back) == lines,
+        "JSON Lines round-trips",
+    )
+
+    # Errors carry the 1-based record position on top of the engine error.
+    var line_error = String("")
+    try:
+        _ = loads_lines(String('{"ok":1}\n{broken\n'))
+    except error:
+        line_error = String(error)
+    _assert("line 2" in line_error, "line number in error: " + line_error)
+
+    # RFC 7464: RS-framed records, LF-terminated on emission.
+    var seq = dumps_seq(docs)
+    _assert(
+        seq == '\x1e{"a":1}\n\x1e[1,2]\n\x1e"x"\n',
+        "dumps_seq emits RS json LF",
+    )
+    var seq_docs = loads_seq(seq.copy())
+    _assert(
+        len(seq_docs) == 3 and dumps_seq(seq_docs) == seq,
+        "text sequence round-trips",
+    )
+    var preamble_rejected = False
+    try:
+        _ = loads_seq(String('{"a":1}\n'))
+    except error:
+        preamble_rejected = True
+    _assert(preamble_rejected, "sequence without leading RS is rejected")
+
+
+def test_file_load_dump() raises:
+    var path = String(".build/io_roundtrip_test.json")
+    var doc = loads('{"name":"file","values":[1,2,3]}')
+    dump(doc, path)
+    var back = load(path)
+    _assert(back["name"].to[String]() == "file", "load reads what dump wrote")
+    _assert(dumps(back) == dumps(doc), "file round-trip is byte-faithful")
 
 
 struct AllOptional(Copyable, Defaultable, Movable):
@@ -1018,6 +1072,20 @@ def main() raises:
         print("  PASS test_serde_rejects_non_object_values")
     except error:
         print("  FAIL test_serde_rejects_non_object_values:", String(error))
+        failures += 1
+
+    try:
+        test_json_lines_and_sequences()
+        print("  PASS test_json_lines_and_sequences")
+    except error:
+        print("  FAIL test_json_lines_and_sequences:", String(error))
+        failures += 1
+
+    try:
+        test_file_load_dump()
+        print("  PASS test_file_load_dump")
+    except error:
+        print("  FAIL test_file_load_dump:", String(error))
         failures += 1
 
     if failures == 0:
