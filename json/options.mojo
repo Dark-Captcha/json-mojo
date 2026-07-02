@@ -50,7 +50,9 @@ struct DuplicatePolicy(Comparable, Copyable, Movable, TrivialRegisterPassable):
 
 struct ParseMode(Comparable, Copyable, Movable, TrivialRegisterPassable):
     """Strictness profile within the JSON grammar: `STANDARD` (RFC 8259) or
-    `I_JSON` (RFC 7493 — duplicates rejected, BOM rejected)."""
+    `I_JSON` (RFC 7493 §2 — duplicate names rejected, noncharacters rejected
+    raw or escaped; a leading BOM is rejected too, a strictness this library
+    adds beyond the RFC and documents here)."""
 
     var _code: UInt8
 
@@ -157,6 +159,13 @@ struct ParseOptions(Copyable, Movable, TrivialRegisterPassable):
             self.duplicates == DuplicatePolicy.REJECT
             or self.mode == ParseMode.I_JSON
         )
+
+    @always_inline
+    def rejects_noncharacters(self) -> Bool:
+        """RFC 7493 §2.1: I-JSON strings must not contain Unicode
+        noncharacters (U+FDD0..U+FDEF and the last two code points of every
+        plane), raw or escaped."""
+        return self.mode == ParseMode.I_JSON
 
     @always_inline
     def shadows_duplicates(self) -> Bool:

@@ -199,6 +199,17 @@ def main() raises:
         print("FAIL accept raised:", "a66c690a6e6509", String(error))
         fails += 1
     try:
+        var doc = decode(_unhex("a6c3a90ae6b0b4"))
+        var got = dumps(doc)
+        if got == '"é\\n水"':
+            accepts += 1
+        else:
+            print("FAIL accept:", "a6c3a90ae6b0b4", "got", got)
+            fails += 1
+    except error:
+        print("FAIL accept raised:", "a6c3a90ae6b0b4", String(error))
+        fails += 1
+    try:
         var doc = decode(_unhex("a101"))
         var got = dumps(doc)
         if got == '"\\u0001"':
@@ -913,6 +924,17 @@ def main() raises:
             fails += 1
     except error:
         print("FAIL roundtrip raised:", "a66c690a6e6509", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("a6c3a90ae6b0b4"))
+        var r2 = decode(mp_dumps(r1))
+        if dumps(r2) == '"é\\n水"':
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "a6c3a90ae6b0b4", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "a6c3a90ae6b0b4", String(error))
         fails += 1
     try:
         var r1 = decode(_unhex("a101"))

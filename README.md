@@ -1,6 +1,6 @@
 # json-mojo
 
-> **Version:** 1.3.0 | **Updated:** 2026-07-03
+> **Version:** 1.4.0 | **Updated:** 2026-07-03
 
 Spec-exact, SIMD-accelerated JSON for Mojo — a lazy tape engine with Python-easy verbs, zero dependencies, and a measured performance record.
 
@@ -73,21 +73,21 @@ Pure Mojo — no C toolchain, no FFI, no transitive native dependencies.
 
 Fourteen functions, ten types (ARCHITECTURE.md, Public Surface):
 
-| Name                                                                      | Purpose                                                                                                                               |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `parse[options](var text)` / `loads(var text)` / `loads_bytes(var bytes)` | Text or bytes → `Document`, taken by move (`parse(body^)`) — zero copies                                                              |
-| `try_parse[options]` / `try_deserialize[T]`                               | Non-raising twins returning `Optional`                                                                                                |
-| `dumps[options](doc)`                                                     | Re-emit a document — compact by default, `SerializeOptions(pretty=True)` for two-space indent                                         |
-| `deserialize[T]` / `serialize`                                            | Typed serde; plain structs derive both directions via reflection, no trait required                                                   |
-| `Document`                                                                | Owns the input and the tape; exposes its root's access surface directly                                                               |
-| `Value` / `ValueKind`                                                     | The lazy cursor: `kind()`, `to[T]()`, `["key"]` / `[index]`, `elements()`, `members()`, `at("/pointer")`, `fits_int64/uint64/float64` |
-| `ParseOptions` / `ParseMode` / `DuplicatePolicy` / `SerializeOptions`     | Comptime policy knobs — each combination compiles its own specialized parser                                                          |
-| `FromJson` / `ToJson` / `Serializer`                                      | The conversion protocol, for custom control                                                                                           |
-| `loads_lines` / `dumps_lines` / `loads_seq` / `dumps_seq`                 | JSON Lines (NDJSON) and RFC 7464 text sequences — one `Document` per record, errors name the record (1.1.0)                           |
-| `load(path)` / `dump(doc, path)`                                          | File sugar — bytes reach this library's validator directly (1.1.0)                                                                    |
-| `apply_patch` / `merge_patch`                                              | RFC 6902 JSON Patch and RFC 7396 Merge Patch, over the public cursor surface (1.2.0)                                                  |
-| `ParseOptions(dialect=Dialect.JSON5)`                                      | The full JSON5 grammar — comments, trailing commas, unquoted keys, single quotes, hex, `Infinity` — `dumps` normalizes to JSON (1.2.0) |
-| `msgpack` / `bson` / `cbor` siblings                                       | Binary front-ends over the stable tape contract — each decodes to a `Document` AND encodes back (`decode` / `dumps`); `json.dumps` of any decoded document is transcoding to JSON (1.2.0–1.3.0) |
+| Name                                                                      | Purpose                                                                                                                                                                                         |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `parse[options](var text)` / `loads(var text)` / `loads_bytes(var bytes)` | Text or bytes → `Document`, taken by move (`parse(body^)`) — zero copies                                                                                                                        |
+| `try_parse[options]` / `try_deserialize[T]`                               | Non-raising twins returning `Optional`                                                                                                                                                          |
+| `dumps[options](doc)`                                                     | Re-emit a document — compact by default, `SerializeOptions(pretty=True)` for two-space indent                                                                                                   |
+| `deserialize[T]` / `serialize`                                            | Typed serde; plain structs derive both directions via reflection, no trait required                                                                                                             |
+| `Document`                                                                | Owns the input and the tape; exposes its root's access surface directly                                                                                                                         |
+| `Value` / `ValueKind`                                                     | The lazy cursor: `kind()`, `to[T]()`, `["key"]` / `[index]`, `elements()`, `members()`, `at("/pointer")`, `fits_int64/uint64/float64`                                                           |
+| `ParseOptions` / `ParseMode` / `DuplicatePolicy` / `SerializeOptions`     | Comptime policy knobs — each combination compiles its own specialized parser                                                                                                                    |
+| `FromJson` / `ToJson` / `Serializer`                                      | The conversion protocol, for custom control                                                                                                                                                     |
+| `loads_lines` / `dumps_lines` / `loads_seq` / `dumps_seq`                 | JSON Lines (NDJSON) and RFC 7464 text sequences — one `Document` per record, errors name the record (1.1.0)                                                                                     |
+| `load(path)` / `dump(doc, path)`                                          | File sugar — bytes reach this library's validator directly (1.1.0)                                                                                                                              |
+| `apply_patch` / `merge_patch`                                             | RFC 6902 JSON Patch and RFC 7396 Merge Patch, over the public cursor surface (1.2.0)                                                                                                            |
+| `ParseOptions(dialect=Dialect.JSON5)`                                     | The full JSON5 grammar — comments, trailing commas, unquoted keys, single quotes, hex, `Infinity` — `dumps` normalizes to JSON (1.2.0)                                                          |
+| `msgpack` / `bson` / `cbor` siblings                                      | Binary front-ends over the stable tape contract — each decodes to a `Document` AND encodes back (`decode` / `dumps`); `json.dumps` of any decoded document is transcoding to JSON (1.2.0–1.3.0) |
 
 ### Format coverage
 
@@ -95,11 +95,11 @@ Fourteen functions, ten types (ARCHITECTURE.md, Public Surface):
 | ----------- | ------------------------------------- | --------------------------------------------- | ------------------------------------------------ |
 | JSON        | `loads` — RFC 8259, spec-exact        | `dumps` — byte-faithful re-emission           | JSONTestSuite 283/0 + 95/95 round-trip           |
 | JSON5       | `parse[dialect=JSON5]` — full grammar | `dumps` normalizes to JSON (valid JSON5)      | json5-tests 112/0                                |
-| MessagePack | `msgpack.decode` — full for JSON data | `msgpack.dumps` — smallest-width, full        | 36+5 decode / 17 encode / 36 round-trips, 0 fail |
-| BSON        | `bson.decode` — JSON-typed elements   | `bson.dumps` — int32/64+double width-selected | 15 decode / 10 encode / 15 round-trips, 0 fail   |
-| CBOR        | `cbor.decode` — incl. indefinite+f16  | `cbor.dumps` — shortest-form heads            | RFC 8949 App. A: 43/17/43, 0 fail                |
+| MessagePack | `msgpack.decode` — full for JSON data | `msgpack.dumps` — smallest-width, full        | 37+5 decode / 17 encode / 37 round-trips, 0 fail |
+| BSON        | `bson.decode` — JSON-typed elements   | `bson.dumps` — int32/64+double width-selected | 16 decode / 10 encode / 16 round-trips, 0 fail   |
+| CBOR        | `cbor.decode` — incl. indefinite+f16  | `cbor.dumps` — shortest-form heads            | RFC 8949 App. A: 44/17/44, 0 fail                |
 
-Foreign types no JSON kind can hold (BSON ObjectId/datetime/binary…, CBOR byte strings/tags, msgpack bin/ext) are **rejected by name** — mapping them is a caller decision, never a silent one.
+Foreign types no JSON kind can hold (BSON ObjectId/datetime/binary…, CBOR byte strings/tags, msgpack bin/ext) are **rejected by name** — mapping them is a caller decision, never a silent one. Each format package imports only the public `json.tape` contract module — `json._internal` stays private to `json`.
 
 Errors carry the byte offset **and** the RFC 6901 path of the failure:
 
@@ -123,7 +123,7 @@ Every release re-earns all of it (commands in PERF.md, Reproducing):
 | UTF-8 differential (strict RFC 3629 oracle) | 424 / 424                                                                     |
 | `dumps ∘ loads` idempotence                 | 95/95 corpus files, byte-exact (part of the suite gate's RESULT line)         |
 | json5-tests (Dialect.JSON5)                 | 112 accept+reject cases / **0 failures**                                      |
-| MessagePack vectors (generated)             | 36 accept / 5 float / 14 reject — 0 failures                                  |
+| MessagePack vectors (generated)             | 37 accept / 5 float / 14 reject — 0 failures                                  |
 | Unit battery                                | 40 / 40                                                                       |
 
 ---
@@ -132,13 +132,13 @@ Every release re-earns all of it (commands in PERF.md, Reproducing):
 
 Full record with conditions, protocols, and weaknesses in PERF.md. Headlines (AMD 7950X3D, release build):
 
-| Measure                                | Result                                                               |
-| -------------------------------------- | -------------------------------------------------------------------- |
-| Corpus parse (twitter / citm / canada) | 0.82–1.29 GB/s — **1.8–2.9× EmberJson** measured on the same machine |
+| Measure                                | Result                                                                                    |
+| -------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Corpus parse (twitter / citm / canada) | 0.82–1.29 GB/s — **1.8–2.9× EmberJson** measured on the same machine                      |
 | vs C++ simdjson (same-machine ceiling) | canada at **58%** of the reference; twitter/citm at 14–19% — the named frontier (PERF.md) |
-| Corpus dumps                           | 2.3–8.3 GB/s (raw-span re-emission)                                  |
-| Giant-string parse                     | up to 20 GB/s (SIMD skip + lazy per-body UTF-8)                      |
-| 32-worker aggregate                    | ~15 GB/s parse throughput                                            |
+| Corpus dumps                           | 2.3–8.3 GB/s (raw-span re-emission)                                                       |
+| Giant-string parse                     | up to 20 GB/s (SIMD skip + lazy per-body UTF-8)                                           |
+| 32-worker aggregate                    | ~15 GB/s parse throughput                                                                 |
 
 ---
 
@@ -146,12 +146,12 @@ Full record with conditions, protocols, and weaknesses in PERF.md. Headlines (AM
 
 Stated, not hidden:
 
-| Limit                                                   | Detail                                                                                                                                                                                               |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Limit                                                   | Detail                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `deserialize[List[T]]` / `deserialize[Dict[String, V]]` | The ownership wall fell (finding 36 — working mechanism retained in `.probe/`), but a compiler ICE on cross-module conformance queries blocks re-landing on this pin; the typed container read path is the cursor walk (`elements()` / `members()`). Container **serialization** works fully |
-| Struct derivation contract                              | Be `Defaultable`, or have only trivially-destructible fields                                                                                                                                         |
-| Streaming / JSON Lines                                  | Deferred — a fast-follow, not a v1 blocker (ARCHITECTURE.md, Non-Goals)                                                                                                                              |
-| Platform                                                | linux-64 developed and measured; portable SIMD by construction                                                                                                                                       |
+| Struct derivation contract                              | Be `Defaultable`, or have only trivially-destructible fields                                                                                                                                                                                                                                 |
+| Streaming / JSON Lines                                  | Deferred — a fast-follow, not a v1 blocker (ARCHITECTURE.md, Non-Goals)                                                                                                                                                                                                                      |
+| Platform                                                | linux-64 developed and measured; portable SIMD by construction                                                                                                                                                                                                                               |
 
 ---
 

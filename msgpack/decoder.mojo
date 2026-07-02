@@ -12,23 +12,12 @@
 # REJECTED with named errors — mapping them is a caller decision, not a
 # silent one.
 #
-# Sibling honesty: this in-repo reference uses two `json._internal` modules
-# (tape constants, UTF-8 validation) plus the PUBLIC `Serializer` and
-# `Document(unsafe_buffer=..., unsafe_tape=...)`. An out-of-repo sibling
-# would vendor those two internals; the load-bearing contract is the tape
-# layout and the unsafe constructor.
+# Contract discipline: this package imports ONLY `json.tape` (the tier-2
+# contract's public front door) and the public `Document`/`Serializer`
+# surfaces — never `json._internal.*`. Any out-of-repo sibling gets the
+# identical diet.
 
-from json._internal.bytes import (
-    B_BSLASH,
-    B_CONTROL_MAX,
-    B_QUOTE,
-    CTRL_BS,
-    CTRL_CR,
-    CTRL_FF,
-    CTRL_LF,
-    CTRL_TAB,
-)
-from json._internal.tape import (
+from json.tape import (
     FLAG_ESCAPED,
     TAG_ARRAY,
     TAG_BOOLEAN,
@@ -37,10 +26,22 @@ from json._internal.tape import (
     TAG_OBJECT,
     TAG_STRING,
     make_word0,
+    validate_utf8_span,
 )
-from json._internal.unicode import validate_utf8_span
 from json.document import Document
 from json.serializer import Serializer
+
+# Local byte constants — a front-end defines its own alphabet rather than
+# importing json's internals (the tier-2 rule: `json.tape` and the public
+# surfaces only).
+comptime _B_QUOTE: UInt8 = UInt8(0x22)  # "
+comptime _B_BSLASH: UInt8 = UInt8(0x5C)  # backslash
+comptime _B_CONTROL_MAX: UInt8 = UInt8(0x20)
+comptime _CTRL_BS: UInt8 = UInt8(0x08)  # \b
+comptime _CTRL_TAB: UInt8 = UInt8(0x09)  # \t
+comptime _CTRL_LF: UInt8 = UInt8(0x0A)  # \n
+comptime _CTRL_FF: UInt8 = UInt8(0x0C)  # \f
+comptime _CTRL_CR: UInt8 = UInt8(0x0D)  # \r
 
 
 comptime _MAX_DEPTH: Int = 1024
@@ -412,7 +413,7 @@ def _emit_str(
     var dirty = False
     for i in range(start, start + n):
         var c = bytes[i]
-        if c == B_QUOTE or c == B_BSLASH or c < B_CONTROL_MAX:
+        if c == _B_QUOTE or c == _B_BSLASH or c < _B_CONTROL_MAX:
             dirty = True
             break
     if not dirty:
@@ -422,28 +423,34 @@ def _emit_str(
     comptime HEX = "0123456789abcdef"
     var hex_bytes = HEX.as_bytes()
     var out_start = input_length + tail.byte_length()
+    # The re-escaped text accumulates as BYTES: escapes are ASCII and every
+    # other byte — including multibyte UTF-8 — passes through exactly.
+    # Building through `chr` would re-encode bytes >= 0x80 as two-byte code
+    # points and silently corrupt non-ASCII text.
+    var chunk = List[UInt8]()
     for i in range(start, start + n):
         var c = bytes[i]
-        if c == B_QUOTE:
-            tail += '\\"'
-        elif c == B_BSLASH:
-            tail += "\\\\"
-        elif c == CTRL_BS:
-            tail += "\\b"
-        elif c == CTRL_TAB:
-            tail += "\\t"
-        elif c == CTRL_LF:
-            tail += "\\n"
-        elif c == CTRL_FF:
-            tail += "\\f"
-        elif c == CTRL_CR:
-            tail += "\\r"
-        elif c < B_CONTROL_MAX:
-            tail += "\\u00"
-            tail += chr(Int(hex_bytes[Int((c >> UInt8(4)) & _NIBBLE)]))
-            tail += chr(Int(hex_bytes[Int(c & _NIBBLE)]))
+        if c == _B_QUOTE:
+            chunk.extend('\\"'.as_bytes())
+        elif c == _B_BSLASH:
+            chunk.extend("\\\\".as_bytes())
+        elif c == _CTRL_BS:
+            chunk.extend("\\b".as_bytes())
+        elif c == _CTRL_TAB:
+            chunk.extend("\\t".as_bytes())
+        elif c == _CTRL_LF:
+            chunk.extend("\\n".as_bytes())
+        elif c == _CTRL_FF:
+            chunk.extend("\\f".as_bytes())
+        elif c == _CTRL_CR:
+            chunk.extend("\\r".as_bytes())
+        elif c < _B_CONTROL_MAX:
+            chunk.extend("\\u00".as_bytes())
+            chunk.append(hex_bytes[Int((c >> UInt8(4)) & _NIBBLE)])
+            chunk.append(hex_bytes[Int(c & _NIBBLE)])
         else:
-            tail += chr(Int(c))
+            chunk.append(c)
+    tail += String(unsafe_from_utf8=chunk)
     tape.append(make_word0(TAG_STRING, FLAG_ESCAPED, out_start))
     tape.append(UInt64(input_length + tail.byte_length()))
     return start + n

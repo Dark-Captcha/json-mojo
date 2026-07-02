@@ -1,6 +1,6 @@
 # Architecture — json-mojo
 
-> **Version:** 1.3.0 | **Updated:** 2026-07-03
+> **Version:** 1.4.0 | **Updated:** 2026-07-03
 
 Purpose, binding contracts, and system map of json-mojo — the criteria every structural decision in this library is judged against.
 
@@ -118,7 +118,7 @@ RFC 8259 defines exactly six kinds; the tape alphabet is those six tags and neve
 | `array`   | Tag plus a skip-link to the container's end — lean tape, forward iteration is the cheap direction                                                                                                                                                   |
 | `object`  | Tag plus a skip-link to the container's end — member lookup scans forward and early-exits, honoring the parse-time duplicate policy (members shadowed under `last_wins` are invisible to lookup, iteration, `len`, and `dumps`)                     |
 
-Spans-until-asked is also the lazy architecture the Performance Promise forces — this layer _is_ the On-Demand design. Typed deserialization and the serializer are both consumers of the same tape; a second parser never exists. The entry layout above — uniform two-word records, `[tag:8 | flags:8 | a:48][b:64]` — is the **stable contract of extension tier 2**: a future binary front-end emits this tape and inherits every consumer unchanged (`FLAG_ARENA` is reserved for exactly that — spans pointing into a decoder-owned side arena, since binary numbers have no digit text in the input).
+The contract has a front door in code: the public `json.tape` module exports exactly the symbols a front-end may use (tags, flags, entry accessors, `make_word0`, `skip_past`, the span decoders and number readers) — format packages import it and the public `Document`/`Serializer`/`Value` surfaces, never `json._internal.*`. Spans-until-asked is also the lazy architecture the Performance Promise forces — this layer _is_ the On-Demand design. Typed deserialization and the serializer are both consumers of the same tape; a second parser never exists. The entry layout above — uniform two-word records, `[tag:8 | flags:8 | a:48][b:64]` — is the **stable contract of extension tier 2**: a future binary front-end emits this tape and inherits every consumer unchanged (`FLAG_ARENA` is reserved for exactly that — spans pointing into a decoder-owned side arena, since binary numbers have no digit text in the input).
 
 ### Layer 2 — The Protocol
 
@@ -195,6 +195,8 @@ a decoding layer.)
 | `max_depth`  | `1024`       | One register compare per container; stage 2 walks iteratively, so the value is pure bomb defense                                                                                                                                                                                                              |
 | `mode`       | `standard`   | `i_json` (RFC 7493) flips duplicates to reject and the BOM to an error                                                                                                                                                                                                                                        |
 | `dialect`    | `json`       | Which TEXT grammar is read (tier 1): `json5` opts into the full JSON5 grammar via a dedicated scalar scanner onto the same tape; the RFC 8259 engine and its promise are untouched by erasure                                                                                                                  |
+
+Why these are COMPTIME parameters and not runtime keywords (`loads(text, dialect=...)`): a runtime knob taxes every caller — both engines live in every binary, plus a branch deciding between them on every parse — while a comptime knob monomorphizes. Each distinct `ParseOptions` value compiles its own specialized parser; untaken `comptime if` branches ERASE (finding 16), so the default parser is byte-identical to one built from a library with no dialects in it — the Performance Promise holds by construction, not by branch prediction. Dead code stays dead too: a program that never names `Dialect.JSON5` never compiles the JSON5 scanner or its Unicode identifier tables. And the knobs are typed comptime values, so a misspelled option is a compile error, never a runtime surprise. The cost, stated: a dialect cannot be selected from runtime data inside the library — a caller deciding by file extension writes one branch at the call site, each arm still fully specialized.
 
 Duplicate detection (`last_wins` / `reject` / `i_json`) compares member names by CHARACTER (RFC 7493 §2.3) — an escaped spelling of the same name cannot evade it — matching the lookup path, which decodes escaped names before comparing. Two behaviors are fixed rather than fields: a leading BOM is skipped (a once-per-document 3-byte check; RFC 8259 §8.1 sanctions ignoring it, and `i_json` rejects it), and trailing non-whitespace after the document is rejected (once-per-document EOF check; trailing whitespace itself is grammar-legal).
 
@@ -285,6 +287,7 @@ json/
 ├── patch.mojo           # RFC 6902 + RFC 7396 over the public Value surface (tier 3)
 ├── serde.mojo           # ToJson + conformances, deserialize / try_deserialize / serialize
 ├── serializer.mojo      # Serializer + dumps (iterative tape re-emission) + SIMD escaping
+├── tape.mojo            # the tier-2 contract's PUBLIC front door (re-exports)
 └── _internal/
     ├── bytes.mojo       # the byte-constant alphabet (RFC 8259)
     ├── simd.mojo        # lane idioms: classification tables, prefix-XOR, escape scanner

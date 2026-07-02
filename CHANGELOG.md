@@ -2,6 +2,31 @@
 
 All notable changes to json-mojo. Format follows Keep a Changelog; versions follow SemVer once past 1.0.
 
+## [1.4.0] — 2026-07-03
+
+### Added
+
+- `json.tape` — the tier-2 contract's public front door: tags, flags, entry accessors, `make_word0`, `skip_past`, the span decoders and number readers, re-exported for format packages. `msgpack`/`bson`/`cbor` now import only this module and the public surfaces — `json._internal` is private to `json` again.
+- Regression vectors pairing non-ASCII text with escape-triggering bytes in all three binary gates (`é\n水` family) — the class the previous vectors missed.
+
+### Changed
+
+- **Parse is 1.5× faster on structural corpora and 1.2× on numbers.** Stage 1 emits atom STARTS as pseudo-structural positions (simdjson-style scalar-edge mask with a cross-block carry), so stage 2 dispatches every value from a position and never re-scans whitespace gaps; number validation fuses span discovery with grammar checking — each byte touched once. citm 1.11–1.29 → 1.62–1.73 GB/s; canada 0.86–0.88 → 0.96–1.11 GB/s; twitter flat (string-bound). The scalar mirror gate grew the same pseudo-structural semantics.
+- Tape writes go through a raw pointer over a PROVEN exact capacity bound (every entry consumes its own index position) — the per-append growth branch is dead, `debug_assert` re-proves the bound on every input in assertion builds.
+- Parse-error paths are now real RFC 6901: member-name tokens are decoded and `~`/`/`-escaped (`{"a/b":{"m~n":…}}` fails "in /a~1b/m~0n/…", previously the raw, unescaped, byte-mangled spelling).
+
+### Fixed
+
+- **Binary decoders corrupted non-ASCII strings that also needed JSON escaping** (msgpack, BSON, CBOR — one root cause, three sites): the escape re-emitter rebuilt text through per-byte code points, re-encoding every byte ≥ 0x80. Dirty multibyte strings now pass through byte-exact; encoders were already correct.
+- `apply_patch`/`Value.at` corrupted non-ASCII JSON Pointer tokens the same way (RFC 6901 §3); tokens now keep their UTF-8 bytes exactly.
+- `move` with `from == path` skipped validating that the location exists (RFC 6902 §4.4 MUST); it now resolves the pointer before returning unchanged.
+- `test` compares numbers exactly by normalized decimal components — Float64 rounding could equate values differing past 2^53, and magnitudes beyond Float64 fell to raw-text comparison that missed equal spellings (`1e999` vs `1E999`).
+- Pointer evaluation into an object with a duplicated member name now fails as RFC 6901 §4 requires (Value's own `[]` stays documented first-wins).
+- A BOM abutting a bare atom root (`EF BB BF` then `1`) parses again — the two form one scalar run in the new index, whose only start position lay inside the BOM and was skipped; the builder now dispatches the straddled atom at the ruling boundary. Regression case added (JSONTestSuite has no BOM+bare-atom file).
+- Explicit exponents of any length classify correctly: accumulation clamps far past Float64's range instead of wrapping Int64 — `1e9999999999999999999` is overflow (was 0.0), its negative twin underflows to 0.0 (was an overflow error).
+- `ParseMode.I_JSON` now enforces RFC 7493 §2.1's noncharacter prohibition (U+FDD0..U+FDEF and the last two code points of every plane), raw or escaped — comptime-gated, so the standard-mode parser is byte-identical to before.
+- `references/`: RFC 8949 is now vendored per the repo's IETF-vendoring policy, the provenance re-fetch loop includes every vendored RFC (6902, 7396, and 8949 were missing), and the invalid-UTF-8 mandate is cited to RFC 3629 §3 (the MUST lives there, not §10).
+
 ## [1.3.0] — 2026-07-03
 
 Every format, both directions: MessagePack, BSON, and CBOR all decode AND encode over the stable tape contract. (JSON5's encode story is `dumps` itself — JSON output is valid JSON5 by inclusion.)

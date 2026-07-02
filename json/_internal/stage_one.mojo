@@ -1,13 +1,17 @@
 # stage_one — the SIMD structural indexer: one pass over the input emitting
 # the byte offsets of every structural character ({ } [ ] , :) outside
-# strings, plus every unescaped quote (the string boundaries stage 2 walks
-# between). All per-byte questions become branchless mask arithmetic on
-# 64-byte blocks; the only loop body branch-work is walking set bits.
+# strings, every unescaped quote (the string boundaries stage 2 walks
+# between), and the START byte of every atom — a pseudo-structural, after
+# simdjson, so stage 2 dispatches each value directly from a position and
+# never re-scans whitespace gaps. All per-byte questions become branchless
+# mask arithmetic on 64-byte blocks; the only loop body branch-work is
+# walking set bits.
 #
 # Padding contract: the caller guarantees at least BLOCK_WIDTH readable
 # bytes past `byte_length` (Document reserves them — .probe/SYNTAX.md,
 # finding 17), so every block load is legal; tail bits beyond the length
-# are masked off before use.
+# are masked off before use — including the scalar mask, so padding
+# garbage can never mint an atom position past the input.
 #
 # Algorithm after simdjson (Langdale & Lemire, Apache-2.0); cross-checked
 # against ehsanmok/json (MIT). Equivalence with the scalar mirror in
@@ -17,6 +21,7 @@
 from std.bit import count_trailing_zeros
 from std.memory.unsafe import pack_bits
 
+from json._internal.bytes import B_CR, B_LF, B_SPACE, B_TAB
 from json._internal.simd import (
     BLOCK_WIDTH,
     CATEGORY_BACKSLASH,
@@ -29,8 +34,9 @@ from json._internal.simd import (
 
 
 struct StructuralIndex(Movable):
-    """The stage-1 product: ascending byte offsets of structural characters
-    and unescaped quotes. Stage 2 walks this instead of the raw bytes."""
+    """The stage-1 product: ascending byte offsets of structural characters,
+    unescaped quotes, and atom starts. Stage 2 walks this instead of the
+    raw bytes."""
 
     var positions: List[UInt32]
 
@@ -48,9 +54,13 @@ def build_structural_index(text: String) -> StructuralIndex:
 
     # Cross-block carries: `prev_in_string` is all-ones while inside a
     # string (an XOR mask for the prefix-XOR result); `prev_escape` is the
-    # single-bit "byte 0 is escaped" carry maintained by the escape scanner.
+    # single-bit "byte 0 is escaped" carry maintained by the escape scanner;
+    # `prev_scalar` is the single-bit "byte 63 was a non-quote scalar
+    # outside strings" carry that keeps an atom spanning two blocks from
+    # minting a second start position.
     var prev_in_string = UInt64(0)
     var prev_escape = UInt64(0)
+    var prev_scalar = UInt64(0)
 
     var offset = 0
     while offset < length:
@@ -67,35 +77,49 @@ def build_structural_index(text: String) -> StructuralIndex:
         var backslash_mask = pack_bits[dtype=DType.uint64](
             (classified & V(CATEGORY_BACKSLASH)).ne(V(0))
         )
+        var ws_mask = pack_bits[dtype=DType.uint64](
+            block.eq(V(B_SPACE))
+            | block.eq(V(B_TAB))
+            | block.eq(V(B_LF))
+            | block.eq(V(B_CR))
+        )
 
         # Tail block: bits at and past `length` are padding garbage.
+        var valid = ~UInt64(0)
         var remaining = length - offset
         if remaining < BLOCK_WIDTH:
-            var valid = (UInt64(1) << UInt64(remaining)) - 1
+            valid = (UInt64(1) << UInt64(remaining)) - 1
             structural_mask &= valid
             quote_mask &= valid
             backslash_mask &= valid
+            ws_mask &= valid
 
         # Fast path A: entirely inside a string with no specials — the block
         # emits nothing and no carry changes (the giant-string-body skip).
+        # Entering here implies `prev_scalar == 0` (the prior block's byte
+        # 63 was inside the string); byte 63 here is in-string too.
         if (
             quote_mask == 0
             and backslash_mask == 0
             and prev_in_string == ~UInt64(0)
             and prev_escape == 0
         ):
+            prev_scalar = UInt64(0)
             offset += BLOCK_WIDTH
             continue
 
-        # Fast path B: nothing interesting and no carried state — common for
-        # blocks between values and blocks of pure padding.
+        # Fast path B: no quotes, no backslashes, no carried string/escape
+        # state — structurals and atom starts come from plain mask math.
         if (
             quote_mask == 0
             and backslash_mask == 0
             and prev_in_string == 0
             and prev_escape == 0
         ):
-            var bits = structural_mask
+            var scalar = ~(structural_mask | ws_mask) & valid
+            var atom_starts = scalar & ~((scalar << 1) | prev_scalar)
+            prev_scalar = scalar >> UInt64(63)
+            var bits = structural_mask | atom_starts
             while bits != 0:
                 index.positions.append(
                     UInt32(offset + Int(count_trailing_zeros(bits)))
@@ -107,11 +131,18 @@ def build_structural_index(text: String) -> StructuralIndex:
         var escape_mask = find_escape_mask64(backslash_mask, prev_escape)
         var unescaped_quotes = quote_mask & ~escape_mask
         var in_string_mask = prefix_xor64(unescaped_quotes) ^ prev_in_string
-        var emit_mask = (structural_mask & ~in_string_mask) | unescaped_quotes
+        var scalar = (
+            ~(structural_mask | ws_mask | quote_mask) & ~in_string_mask & valid
+        )
+        var atom_starts = scalar & ~((scalar << 1) | prev_scalar)
+        var emit_mask = (
+            (structural_mask & ~in_string_mask) | unescaped_quotes | atom_starts
+        )
 
         prev_in_string = ~UInt64(0) if (in_string_mask >> UInt64(63)) & UInt64(
             1
         ) else UInt64(0)
+        prev_scalar = scalar >> UInt64(63)
 
         var bits = emit_mask
         while bits != 0:

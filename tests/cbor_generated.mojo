@@ -363,6 +363,16 @@ def main() raises:
         print("FAIL accept raised:", "63e6b0b4", String(error))
         fails += 1
     try:
+        var d = decode(_unhex("67c3a9220ae6b0b4"))
+        if dumps(d) == '"é\\"\\n水"':
+            accepts += 1
+        else:
+            print("FAIL accept:", "67c3a9220ae6b0b4", "got", dumps(d))
+            fails += 1
+    except error:
+        print("FAIL accept raised:", "67c3a9220ae6b0b4", String(error))
+        fails += 1
+    try:
         var d = decode(_unhex("80"))
         if dumps(d) == "[]":
             accepts += 1
@@ -1011,6 +1021,17 @@ def main() raises:
             fails += 1
     except error:
         print("FAIL roundtrip raised:", "63e6b0b4", String(error))
+        fails += 1
+    try:
+        var r1 = decode(_unhex("67c3a9220ae6b0b4"))
+        var r2 = decode(cbor_dumps(r1))
+        if dumps(r2) == '"é\\"\\n水"':
+            roundtrips += 1
+        else:
+            print("FAIL roundtrip:", "67c3a9220ae6b0b4", "got", dumps(r2))
+            fails += 1
+    except error:
+        print("FAIL roundtrip raised:", "67c3a9220ae6b0b4", String(error))
         fails += 1
     try:
         var r1 = decode(_unhex("80"))

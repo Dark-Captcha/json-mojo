@@ -261,8 +261,10 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
         )
         var i = 1
         while i <= n:
-            # Decode one reference token (up to the next '/' or the end).
-            var token = String("")
+            # Decode one reference token (up to the next '/' or the end) —
+            # byte-wise: tokens keep their UTF-8 bytes exactly (RFC 6901 §3;
+            # re-encoding each byte as a code point corrupts non-ASCII keys).
+            var token_bytes = List[UInt8]()
             while i < n and pointer_bytes[i] != B_SLASH:
                 var c = pointer_bytes[i]
                 if c == B_TILDE:
@@ -272,9 +274,9 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
                         )
                     var next = pointer_bytes[i + 1]
                     if next == B_0:
-                        token += "~"
+                        token_bytes.append(B_TILDE)
                     elif next == B_1:
-                        token += "/"
+                        token_bytes.append(B_SLASH)
                     else:
                         raise Error(
                             "json.value: invalid JSON Pointer escape '~"
@@ -283,8 +285,9 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
                         )
                     i += 2
                 else:
-                    token += chr(Int(c))
+                    token_bytes.append(c)
                     i += 1
+            var token = String(unsafe_from_utf8=token_bytes)
             var tag = entry_tag(current._tape[current._entry * 2])
             if tag == TAG_OBJECT:
                 current = current[token]

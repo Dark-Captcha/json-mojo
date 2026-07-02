@@ -19,9 +19,11 @@
 #
 # Grammar walking is iterative — the explicit frame stack is bounded by
 # `options.max_depth` (hostile-input contract; the one runtime counter).
-# Atoms (numbers, true/false/null) never appear in the structural index;
-# they are found in the gaps between structurals and validated against the
-# RFC 8259 §6 number grammar / exact literal spelling. Strings are
+# Atoms (numbers, true/false/null) enter the structural index as
+# pseudo-structural START positions (stage 1's scalar-edge mask), so every
+# value dispatches from a position — no whitespace gap is ever re-scanned —
+# and the atom validators fuse span discovery with the RFC 8259 §6 number
+# grammar / exact literal spelling, touching each byte once. Strings are
 # validated at parse time — control bytes, escape validity, `\uXXXX` hex,
 # and surrogate pairing (unpaired escapes rejected always: a lone
 # surrogate is unencodable in a UTF-8 String) — so access never re-checks.
@@ -37,6 +39,7 @@ from json._internal.bytes import (
     B_A_UPPER,
     B_B,
     B_BSLASH,
+    B_COLON,
     B_COMMA,
     B_CR,
     B_DOT,
@@ -60,6 +63,7 @@ from json._internal.bytes import (
     B_SPACE,
     B_T,
     B_TAB,
+    B_TILDE,
     B_U,
 )
 from json._internal.stage_one import StructuralIndex
@@ -147,10 +151,11 @@ struct _Frame(Copyable, Movable, TrivialRegisterPassable):
     var state: UInt8
     var count: Int
     var is_object: Bool
-    # Current member key span (objects) — two stores per member, read only
-    # when an error needs its RFC 6901 path.
+    # Current member key span and flags (objects) — three stores per member,
+    # read only when an error needs its RFC 6901 path.
     var key_start: Int
     var key_end: Int
+    var key_flags: UInt8
 
     @always_inline
     def __init__(out self, *, tape_entry: Int, state: UInt8, is_object: Bool):
@@ -160,23 +165,58 @@ struct _Frame(Copyable, Movable, TrivialRegisterPassable):
         self.is_object = is_object
         self.key_start = 0
         self.key_end = 0
+        self.key_flags = 0
 
 
 def _error(message: String, offset: Int) raises:
     raise Error("json.parse: " + message + " at byte " + String(offset))
 
 
+def _pointer_token(key: String) -> String:
+    """One RFC 6901 reference token: `~` → `~0`, `/` → `~1` (§3); all other
+    bytes pass through exactly (the key is already valid UTF-8)."""
+    var out = List[UInt8]()
+    var bytes = key.as_bytes()
+    for k in range(len(bytes)):
+        var byte = bytes[k]
+        if byte == B_TILDE:
+            out.append(B_TILDE)
+            out.append(B_0)
+        elif byte == B_SLASH:
+            out.append(B_TILDE)
+            out.append(B_1)
+        else:
+            out.append(byte)
+    return String(unsafe_from_utf8=out)
+
+
 def _describe_path(stack: List[_Frame], bytes: Span[UInt8, _]) -> String:
     """The RFC 6901 path of the open position — appended to parse errors so a
-    failure inside a large document is findable. Built only on the error
-    path; the hot loop pays nothing beyond the per-member key-span stores."""
+    failure inside a large document is findable. Tokens are the DECODED
+    member names with `~`/`/` escaped per §3, so the emitted pointer
+    round-trips. Built only on the error path; the hot loop pays nothing
+    beyond the per-member key-span stores."""
     var path = String("")
     for i in range(len(stack)):
         path += "/"
         if stack[i].is_object:
             if stack[i].key_end > stack[i].key_start:
-                for k in range(stack[i].key_start, stack[i].key_end):
-                    path += chr(Int(bytes[k]))
+                var key: String
+                if (stack[i].key_flags & FLAG_REENCODE) != UInt8(0):
+                    key = decode_json5_string(
+                        bytes, stack[i].key_start, stack[i].key_end
+                    )
+                elif (stack[i].key_flags & FLAG_ESCAPED) != UInt8(0):
+                    key = decode_escaped_string(
+                        bytes, stack[i].key_start, stack[i].key_end
+                    )
+                else:
+                    key = String(
+                        unsafe_from_utf8=bytes[
+                            stack[i].key_start : stack[i].key_end
+                        ]
+                    )
+                path += _pointer_token(key)
             else:
                 path += "?"
         else:
@@ -214,62 +254,90 @@ def _digit_run_end(bytes: Span[UInt8, _], start: Int, end: Int) -> Int:
     return end
 
 
-def _validate_number(bytes: Span[UInt8, _], start: Int, end: Int) raises:
-    """RFC 8259 §6: -?(0|[1-9]digits)(.digits)?([eE][+-]?digits)?
+@always_inline
+def _is_atom_terminator(byte: UInt8) -> Bool:
+    """A byte that may legally end an atom's span: whitespace or any byte
+    stage 1 emits a position for. The grammar walker rejects misplaced
+    values at their own positions — this check only stops fused garbage
+    (`1x`, `trueX`) with the byte-precise error the gap design gave."""
+    return (
+        _is_whitespace(byte)
+        or byte == B_COMMA
+        or byte == B_COLON
+        or byte == B_RBRACE
+        or byte == B_RBRACK
+        or byte == B_LBRACE
+        or byte == B_LBRACK
+        or byte == B_QUOTE
+    )
+
+
+def _validate_number_end(
+    bytes: Span[UInt8, _], start: Int, limit: Int
+) raises -> Int:
+    """RFC 8259 §6: -?(0|[1-9]digits)(.digits)?([eE][+-]?digits)? —
+    validated from `start`, returning the exclusive end of the span.
     Digit runs — the dominant bytes of number-heavy documents — advance via
-    the SIMD hop above instead of per-byte compares."""
+    the SIMD hop above instead of per-byte compares. Span discovery and
+    validation are one pass: each byte is touched exactly once, and the
+    byte after the span must be an atom terminator."""
     var i = start
-    if i < end and bytes[i] == B_MINUS:
+    if i < limit and bytes[i] == B_MINUS:
         i += 1
-    if i >= end:
+    if i >= limit:
         _error("number is missing digits", start)
     if bytes[i] == B_0:
         i += 1
     elif bytes[i] >= B_1 and bytes[i] <= B_9:
-        i = _digit_run_end(bytes, i + 1, end)
+        i = _digit_run_end(bytes, i + 1, limit)
     else:
         _error("number has an invalid leading digit", i)
-    if i < end and bytes[i] == B_DOT:
+    if i < limit and bytes[i] == B_DOT:
         i += 1
-        if i >= end or bytes[i] < B_0 or bytes[i] > B_9:
+        if i >= limit or bytes[i] < B_0 or bytes[i] > B_9:
             _error("number has a bare decimal point", i)
-        i = _digit_run_end(bytes, i + 1, end)
-    if i < end and (bytes[i] == B_E_LOWER or bytes[i] == B_E_UPPER):
+        i = _digit_run_end(bytes, i + 1, limit)
+    if i < limit and (bytes[i] == B_E_LOWER or bytes[i] == B_E_UPPER):
         i += 1
-        if i < end and (bytes[i] == B_PLUS or bytes[i] == B_MINUS):
+        if i < limit and (bytes[i] == B_PLUS or bytes[i] == B_MINUS):
             i += 1
-        if i >= end or bytes[i] < B_0 or bytes[i] > B_9:
+        if i >= limit or bytes[i] < B_0 or bytes[i] > B_9:
             _error("number has an empty exponent", i)
-        i = _digit_run_end(bytes, i + 1, end)
-    if i != end:
+        i = _digit_run_end(bytes, i + 1, limit)
+    if i < limit and not _is_atom_terminator(bytes[i]):
         _error("number has trailing characters", i)
+    return i
 
 
-def _validate_literal(
-    bytes: Span[UInt8, _], start: Int, end: Int
+def _validate_literal_at(
+    bytes: Span[UInt8, _], start: Int, limit: Int
 ) raises -> UInt64:
-    """Exact `true` / `false` / `null` spelling. Returns the tape word0."""
-    var length = end - start
-    if length == 4 and bytes[start] == B_T:
+    """Exact `true` / `false` / `null` spelling at `start`, terminator-
+    checked. Returns the tape word0."""
+    var byte = bytes[start]
+    if byte == B_T and start + 4 <= limit:
         if (
             bytes[start + 1] == B_R
             and bytes[start + 2] == B_U
             and bytes[start + 3] == B_E_LOWER
+            and (start + 4 == limit or _is_atom_terminator(bytes[start + 4]))
         ):
             return make_word0(TAG_BOOLEAN, UInt8(0), 1)
-    elif length == 5 and bytes[start] == B_F:
+    elif byte == B_F and start + 5 <= limit:
         if (
             bytes[start + 1] == B_A
             and bytes[start + 2] == B_L
             and bytes[start + 3] == B_S
             and bytes[start + 4] == B_E_LOWER
+            and (start + 5 == limit or _is_atom_terminator(bytes[start + 5]))
         ):
             return make_word0(TAG_BOOLEAN, UInt8(0), 0)
-    elif length == 4 and bytes[start] == B_N:
+    elif byte == B_N and start + 4 <= limit:
         if (
             bytes[start + 1] == B_U
             and bytes[start + 2] == B_L
             and bytes[start + 3] == B_L
+            and (start + 4 == limit or _is_atom_terminator(bytes[start + 4]))
         ):
             return make_word0(TAG_NULL, UInt8(0), 0)
     _error("unrecognized literal", start)
@@ -299,9 +367,9 @@ def _read_hex4(bytes: Span[UInt8, _], i: Int, end: Int) raises -> Int:
     return code
 
 
-def _validate_string(
-    bytes: Span[UInt8, _], start: Int, end: Int
-) raises -> Bool:
+def _validate_string[
+    options: ParseOptions = ParseOptions()
+](bytes: Span[UInt8, _], start: Int, end: Int) raises -> Bool:
     """Validate a string body (between the quotes) per RFC 8259 §7: no raw
     control bytes, only legal escapes, `\\uXXXX` well-formed, surrogates
     paired. Returns True iff the body contains any escape (the lazy-decode
@@ -375,14 +443,28 @@ def _validate_string(
             var low = _read_hex4(bytes, i + 2, end)
             if low < 0xDC00 or low > 0xDFFF:
                 _error("invalid low surrogate escape", i + 2)
+            comptime if options.rejects_noncharacters():
+                var code_point = (
+                    0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)
+                )
+                if (code_point & 0xFFFE) == 0xFFFE:
+                    _error("noncharacter escape in I-JSON string", i)
             i += 6
         elif code >= 0xDC00 and code <= 0xDFFF:
             _error("unpaired low surrogate escape", i)
+        comptime if options.rejects_noncharacters():
+            # RFC 7493 §2.1, escaped spellings (raw bytes are checked by the
+            # UTF-8 gate below): BMP noncharacters via a single escape.
+            if (code < 0xD800 or code > 0xDFFF) and (
+                (code >= 0xFDD0 and code <= 0xFDEF) or (code & 0xFFFE) == 0xFFFE
+            ):
+                _error("noncharacter escape in I-JSON string", i - 5)
     if saw_high:
         # Non-ASCII present: validate this body as UTF-8 (RFC 3629) — string
         # bodies are the only place non-ASCII can legally occur, so this IS
-        # the document's UTF-8 gate. Pure-ASCII bodies pay nothing.
-        validate_utf8_span(bytes, start, end)
+        # the document's UTF-8 gate. Pure-ASCII bodies pay nothing. I-JSON
+        # additionally rejects raw noncharacters here (RFC 7493 §2.1).
+        validate_utf8_span[options.rejects_noncharacters()](bytes, start, end)
     return has_escape
 
 
@@ -418,45 +500,49 @@ def _build_tape_inner[
     var length = len(bytes)
     ref positions = index.positions
 
-    var tape = List[UInt64](capacity=len(positions) * 2 + 8)
+    # The capacity is an exact upper bound, not a guess — every two-word
+    # entry consumes its own index position: an atom start and an open are
+    # one position each, a string holds two (its quote pair), and closes,
+    # commas, and colons hold positions while writing nothing. The growth
+    # branch per append is therefore provably dead: writes go through the
+    # raw pointer with `words` as the write cursor, `debug_assert` re-proves
+    # the bound on every input in assertion builds, and the final `shrink`
+    # sets the true length.
+    var bound = len(positions) * 2 + 8
+    var tape = List[UInt64](unsafe_uninit_length=bound)
+    var tp = tape.unsafe_ptr()
+    var words = 0
     var root_seen = False
 
-    # `cursor` walks raw bytes between structurals; `p` walks the index.
-    var cursor = start
+    # `p` walks the index — every value starts AT a position (atom starts
+    # are pseudo-structurals), so no byte between positions is re-scanned.
+    # A leading BOM's bytes are scalars to stage 1: its positions fall
+    # before `start` (the caller's BOM ruling) and are skipped. When the
+    # root atom ABUTS the BOM (`EF BB BF` then `1`) the two form one scalar
+    # run whose only start position lies inside the BOM — dispatch that
+    # atom at `start` directly; its entry charges the skipped position, so
+    # the capacity bound holds.
     var p = 0
-
-    while True:
-        var next_structural = length if p >= len(positions) else Int(
-            positions[p]
-        )
-
-        # --- The gap before the next structural may hold one atom. --------
-        while cursor < next_structural and _is_whitespace(bytes[cursor]):
-            cursor += 1
-        if cursor < next_structural:
-            var atom_start = cursor
-            while cursor < next_structural and not _is_whitespace(
-                bytes[cursor]
-            ):
-                cursor += 1
-            var atom_end = cursor
-            while cursor < next_structural and _is_whitespace(bytes[cursor]):
-                cursor += 1
-            if cursor < next_structural:
-                _error("unexpected characters after value", cursor)
-            _begin_value(stack, root_seen, atom_start)
-            var first = bytes[atom_start]
+    var skipped_scalar_run = False
+    while p < len(positions) and Int(positions[p]) < start:
+        skipped_scalar_run = True
+        p += 1
+    if skipped_scalar_run and start < length:
+        var first = bytes[start]
+        if not _is_whitespace(first) and not _is_atom_terminator(first):
+            _begin_value(stack, root_seen, start)
+            debug_assert(words + 2 <= bound, "tape bound overflow")
             if first == B_MINUS or (first >= B_0 and first <= B_9):
-                _validate_number(bytes, atom_start, atom_end)
-                tape.append(make_word0(TAG_NUMBER, UInt8(0), atom_start))
-                tape.append(UInt64(atom_end))
+                var atom_end = _validate_number_end(bytes, start, length)
+                tp[words] = make_word0(TAG_NUMBER, UInt8(0), start)
+                tp[words + 1] = UInt64(atom_end)
             else:
-                tape.append(_validate_literal(bytes, atom_start, atom_end))
-                tape.append(UInt64(0))
+                tp[words] = _validate_literal_at(bytes, start, length)
+                tp[words + 1] = UInt64(0)
+            words += 2
             _end_value(stack, root_seen)
 
-        if p >= len(positions):
-            break
+    while p < len(positions):
         var at = Int(positions[p])
         var byte = bytes[at]
         p += 1
@@ -469,7 +555,7 @@ def _build_tape_inner[
                 _error("unterminated string", at)
             var close = Int(positions[p])
             p += 1
-            var escaped = _validate_string(bytes, at + 1, close)
+            var escaped = _validate_string[options](bytes, at + 1, close)
             var flags = FLAG_ESCAPED if escaped else UInt8(0)
 
             # A string is either an object key or a value.
@@ -502,14 +588,18 @@ def _build_tape_inner[
                 stack[len(stack) - 1].state = _EXPECT_COLON
                 stack[len(stack) - 1].key_start = at + 1
                 stack[len(stack) - 1].key_end = close
-                tape.append(make_word0(TAG_STRING, flags, at + 1))
-                tape.append(UInt64(close))
+                stack[len(stack) - 1].key_flags = flags
+                debug_assert(words + 2 <= bound, "tape bound overflow")
+                tp[words] = make_word0(TAG_STRING, flags, at + 1)
+                tp[words + 1] = UInt64(close)
+                words += 2
             else:
                 _begin_value(stack, root_seen, at)
-                tape.append(make_word0(TAG_STRING, flags, at + 1))
-                tape.append(UInt64(close))
+                debug_assert(words + 2 <= bound, "tape bound overflow")
+                tp[words] = make_word0(TAG_STRING, flags, at + 1)
+                tp[words + 1] = UInt64(close)
+                words += 2
                 _end_value(stack, root_seen)
-            cursor = close + 1
             continue
 
         if byte == B_LBRACE or byte == B_LBRACK:
@@ -517,11 +607,13 @@ def _build_tape_inner[
             if len(stack) >= options.max_depth:
                 _error("nesting depth limit exceeded", at)
             var is_object = byte == B_LBRACE
-            var entry = len(tape) // 2
-            tape.append(
-                make_word0(TAG_OBJECT if is_object else TAG_ARRAY, UInt8(0), 0)
+            var entry = words // 2
+            debug_assert(words + 2 <= bound, "tape bound overflow")
+            tp[words] = make_word0(
+                TAG_OBJECT if is_object else TAG_ARRAY, UInt8(0), 0
             )
-            tape.append(UInt64(0))
+            tp[words + 1] = UInt64(0)
+            words += 2
             stack.append(
                 _Frame(
                     tape_entry=entry,
@@ -529,7 +621,6 @@ def _build_tape_inner[
                     is_object=is_object,
                 )
             )
-            cursor = at + 1
             continue
 
         if byte == B_RBRACE or byte == B_RBRACK:
@@ -553,13 +644,12 @@ def _build_tape_inner[
                     _error("unexpected ']'", at)
             _ = stack.pop()
             # Patch count and skip-link into the container's entry.
-            var word0 = tape[frame.tape_entry * 2]
-            tape[frame.tape_entry * 2] = make_word0(
+            var word0 = tp[frame.tape_entry * 2]
+            tp[frame.tape_entry * 2] = make_word0(
                 entry_tag(word0), UInt8(0), frame.count
             )
-            tape[frame.tape_entry * 2 + 1] = UInt64(len(tape) // 2)
+            tp[frame.tape_entry * 2 + 1] = UInt64(words // 2)
             _end_value(stack, root_seen)
-            cursor = at + 1
             continue
 
         if byte == B_COMMA:
@@ -574,21 +664,34 @@ def _build_tape_inner[
                 if state != _EXPECT_ARRAY_NEXT:
                     _error("unexpected ','", at)
                 stack[len(stack) - 1].state = _EXPECT_ELEMENT
-            cursor = at + 1
             continue
 
-        # ':'
-        if len(stack) == 0 or not stack[len(stack) - 1].is_object:
-            _error("':' outside an object", at)
-        if stack[len(stack) - 1].state != _EXPECT_COLON:
-            _error("unexpected ':'", at)
-        stack[len(stack) - 1].state = _EXPECT_OBJECT_VALUE
-        cursor = at + 1
+        if byte == B_COLON:
+            if len(stack) == 0 or not stack[len(stack) - 1].is_object:
+                _error("':' outside an object", at)
+            if stack[len(stack) - 1].state != _EXPECT_COLON:
+                _error("unexpected ':'", at)
+            stack[len(stack) - 1].state = _EXPECT_OBJECT_VALUE
+            continue
+
+        # --- Atom start (pseudo-structural from stage 1) -------------------
+        _begin_value(stack, root_seen, at)
+        debug_assert(words + 2 <= bound, "tape bound overflow")
+        if byte == B_MINUS or (byte >= B_0 and byte <= B_9):
+            var atom_end = _validate_number_end(bytes, at, length)
+            tp[words] = make_word0(TAG_NUMBER, UInt8(0), at)
+            tp[words + 1] = UInt64(atom_end)
+        else:
+            tp[words] = _validate_literal_at(bytes, at, length)
+            tp[words + 1] = UInt64(0)
+        words += 2
+        _end_value(stack, root_seen)
 
     if len(stack) != 0:
         _error("unterminated container at end of input", length)
     if not root_seen:
         _error("no value in document", 0)
+    tape.shrink(words)
     return tape^
 
 

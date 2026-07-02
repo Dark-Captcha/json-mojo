@@ -74,6 +74,7 @@ acc(doc(e_double("f", 1.5)), '{"f":1.5}')
 acc(doc(e_string("s", "hi")), '{"s":"hi"}')
 acc(doc(e_string("u", "héllo")), '{"u":"héllo"}')
 acc(doc(e_string("d", 'a"b\n')), '{"d":"a\\"b\\n"}')
+acc(doc(e_string("m", 'é"\n水')), '{"m":"é\\"\\n水"}')  # dirty AND multibyte
 acc(doc(e_bool("t", True), e_bool("f", False)), '{"t":true,"f":false}')
 acc(doc(e_null("z")), '{"z":null}')
 acc(

@@ -1,19 +1,19 @@
 # Roadmap
 
-> **Version:** 1.3.0 | **Updated:** 2026-07-03
+> **Version:** 1.4.0 | **Updated:** 2026-07-03
 
 Direction after v1.3.0, ordered by leverage. PERF.md's weakness table is the performance source of truth; ARCHITECTURE.md's extension tiers are the scope source of truth. As of 1.3.0 every shipped format is BIDIRECTIONAL: JSON and JSON5 in, JSON out (JSON5 normalizes); MessagePack, BSON, and CBOR decode AND encode over the stable tape contract.
 
 ---
 
-## Near — performance (attack the simdjson gap: 14–19% of ceiling on structural corpora)
+## Near — performance (attack the simdjson gap: twitter at ~14% of ceiling is the frontier)
+
+Shipped items leave this file — CHANGELOG.md records them (stage-1 atom hints and the tape-append fast path landed 2026-07-03: citm +45%, canada +20%).
 
 | Item                                      | Why                                                                                                                                       |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Stage-1 atom hints                        | Stop stage 2 re-scanning whitespace gaps stage 1 already saw                                                                              |
-| Tape-append fast path                     | Capacity is exact-bounded already; the growth-check branch remains on every append                                                        |
-| String/key machinery vs the ceiling       | simdjson holds 5.9–6.0 GB/s on twitter/citm same-machine (PERF.md); the structural-corpora gap is the Performance Promise's open frontier |
-| Digit-run hints from validation to access | canada at 58% of ceiling: stage 2 validates digits, access re-parses them — emit spans the Eisel-Lemire path can reuse                    |
+| String/key machinery vs the ceiling       | simdjson holds 5.9–6.0 GB/s on twitter/citm same-machine (PERF.md); twitter is flat after the atom-hints win — this is the open frontier  |
+| Digit-run hints from validation to access | canada at ~68% of ceiling: stage 2 validates digits, access re-parses them — emit spans the Eisel-Lemire path can reuse                   |
 | SIMD pass for the JSON5 scanner           | The JSON5 path is scalar by design (configs, not firehoses); lift stage-1 techniques if JSON5 workloads ever demand it                    |
 
 ## Near — capability

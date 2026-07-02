@@ -756,5 +756,6 @@ def _emit_key[
     stack[len(stack) - 1].state = _EXPECT_COLON
     stack[len(stack) - 1].key_start = key_start
     stack[len(stack) - 1].key_end = key_end
+    stack[len(stack) - 1].key_flags = flags
     tape.append(make_word0(TAG_STRING, flags, key_start))
     tape.append(UInt64(key_end))

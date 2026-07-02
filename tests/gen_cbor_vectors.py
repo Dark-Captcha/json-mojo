@@ -82,6 +82,9 @@ acc(txt("IETF"), '"IETF"')
 acc(txt('"\\'), '"\\"\\\\"')
 acc(txt("ü"), '"ü"')
 acc(txt("水"), '"水"')
+acc(
+    txt('é"\n水'), '"é\\"\\n水"'
+)  # dirty AND multibyte: raw UTF-8 survives the tail
 acc(head(4, 0), "[]")
 acc(head(4, 3) + head(0, 1) + head(0, 2) + head(0, 3), "[1,2,3]")
 acc(

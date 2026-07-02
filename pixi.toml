@@ -3,7 +3,7 @@ authors = ["Huỳnh Bảo Biên <baobien.dev@gmail.com>"]
 channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 name = "json-mojo"
 platforms = ["linux-64"]
-version = "1.3.0"
+version = "1.4.0"
 
 [tasks]
 test = "mojo run -I . tests/run_tests.mojo && mojo run -I . tests/msgpack_generated.mojo && mojo run -I . tests/bson_generated.mojo && mojo run -I . tests/cbor_generated.mojo"

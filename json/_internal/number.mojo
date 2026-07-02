@@ -35,6 +35,11 @@ comptime _MIN_EXP: Int = -1023
 comptime _INF_POWER: UInt64 = UInt64(0x7FF)
 comptime _SMALLEST_P10: Int = -342
 comptime _LARGEST_P10: Int = 308
+# Explicit-exponent accumulation clamp: far past Float64's ±324 (any value
+# at the clamp already saturates to overflow or underflow), re-applied per
+# digit so a grammar-valid exponent of ANY length cannot wrap Int64 and
+# invert the result's class.
+comptime _EXPONENT_CLAMP: Int = 1 << 20
 comptime _SMALLEST_P5: Int = -342
 comptime _MIN_RTE: Int = -4
 comptime _MAX_RTE: Int = 23
@@ -229,6 +234,8 @@ def _slow_exact(
             i += 1
         while i < end:
             exp_val = exp_val * 10 + (Int(bytes[i]) - Int(B_0))
+            if exp_val > _EXPONENT_CLAMP:
+                exp_val = _EXPONENT_CLAMP
             i += 1
         if eneg:
             exp_val = -exp_val
@@ -335,6 +342,8 @@ def parse_float(
             i += 1
         while i < end:
             exp_val = exp_val * 10 + (Int(bytes[i]) - Int(B_0))
+            if exp_val > _EXPONENT_CLAMP:
+                exp_val = _EXPONENT_CLAMP
             i += 1
         if eneg:
             exp_val = -exp_val

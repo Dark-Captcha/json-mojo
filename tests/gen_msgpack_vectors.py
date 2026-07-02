@@ -53,6 +53,9 @@ acc(fixstr("héllo"), '"héllo"')
 acc(fixstr('a"b'), '"a\\"b"')
 acc(fixstr("a\\b"), '"a\\\\b"')
 acc(fixstr("li\nne\t"), '"li\\nne\\t"')
+acc(
+    fixstr("é\n水"), '"é\\n水"'
+)  # dirty AND multibyte: raw UTF-8 survives the tail
 acc(fixstr("\x01"), '"\\u0001"')
 acc(str8("x" * 200), '"' + "x" * 200 + '"')
 acc(str16("y" * 300), '"' + "y" * 300 + '"')

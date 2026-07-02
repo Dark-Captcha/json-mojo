@@ -1,6 +1,6 @@
 # References — Standards Governing json-mojo
 
-> **Version:** 1.3.0 | **Updated:** 2026-07-03
+> **Version:** 1.4.0 | **Updated:** 2026-07-03
 
 Vendored and linked specifications for every byte this library parses or emits, with the constraints each imposes. Entries marked _candidate_ await the design discussion; the spec facts themselves are settled.
 
@@ -37,6 +37,7 @@ Cite entries from this index in module headers rather than restating spec text.
 | `rfc7493.txt` | The I-JSON Message Format          | Proposed Std      | The interoperable strict profile: UTF-8 only, no duplicate names, IEEE-754-safe numbers |
 | `rfc6901.txt` | JSON Pointer                       | Proposed Std      | The standard path syntax (`/a/b/0`, `~0`/`~1` escaping) for addressing into a document  |
 | `rfc8785.txt` | JSON Canonicalization Scheme (JCS) | Informational     | Canonical serialization: I-JSON subset, ECMAScript number formatting, sorted keys       |
+| `rfc8949.txt` | Concise Binary Object Representation     | STD 94        | The `cbor` sibling: major types, heads, indefinite lengths, Appendix A vectors seed its gate, Appendix D half-precision algorithm |
 | `rfc3629.txt` | UTF-8, a Transformation Format     | STD 63            | Byte-level validity of every string this library accepts or produces                    |
 | `rfc6902.txt` | JSON Patch                         | Proposed Std      | `apply_patch`: the six-operation patch format over the `Value` surface (tier 3)         |
 | `rfc7396.txt` | JSON Merge Patch                   | Proposed Std      | `merge_patch`: object-merge semantics with `null`-removal (tier 3)                      |
@@ -50,7 +51,6 @@ Cite entries from this index in module headers rather than restating spec text.
 | ECMA-404, 2nd edition   | Ecma International | The same grammar as RFC 8259, without interoperability guidance — 8259 is the operative citation here                                                       | <https://ecma-international.org/publications-and-standards/standards/ecma-404/> |
 | IEEE 754-2019           | IEEE               | The number model interoperable JSON is limited to (binary64)                                                                                                | <https://standards.ieee.org/ieee/754/6210/>                                     |
 | JSONTestSuite           | Nicolas Seriot     | The de-facto parser conformance corpus (y/n/i cases) — clone into `references/JSONTestSuite` to run `tests/run_suite.sh` (gitignored, like all clones here) | <https://github.com/nst/JSONTestSuite>                                          |
-| RFC 8949 CBOR           | IETF (STD 94)      | The `cbor` sibling: major types, heads, indefinite lengths, Appendix A vectors seed its gate, Appendix D half-precision algorithm                            | <https://www.rfc-editor.org/rfc/rfc8949.txt>                                    |
 | BSON Specification v1.1 | bsonspec.org       | The `bson` sibling: element types, document framing, the cstring/int32-length rules its policies cite                                                        | <https://bsonspec.org/spec.html>                                                |
 | MessagePack spec        | msgpack org        | The `msgpack` sibling: the format-byte table its dispatch (and named constants) mirror                                                                       | <https://github.com/msgpack/msgpack/blob/master/spec.md>                        |
 | JSON5 (spec.json5.org)  | json5 org          | `Dialect.JSON5` (tier 1): the exact grammar the dedicated scanner implements, over ES5.1 lexical productions                                | <https://spec.json5.org/>                                                       |
@@ -68,7 +68,7 @@ Spec-imposed facts the design must answer to. Where the spec leaves a choice, th
 | #   | Finding                                                                                                  | Source            | Constraint on json-mojo                                                                                                                                |
 | --- | -------------------------------------------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 1   | Interchanged JSON MUST be encoded in UTF-8; a BOM MUST NOT be added                                      | RFC 8259 §8.1     | The parser is UTF-8-only; BOM tolerance on input is a design decision to make explicitly                                                               |
-| 2   | Invalid UTF-8 MUST be rejected — overlong forms and surrogate encodings are attacks, not data            | RFC 3629 §10      | Byte-level validation at the boundary is security-mandatory, not optional                                                                              |
+| 2   | Invalid UTF-8 MUST be rejected — overlong forms and surrogate encodings are attacks, not data            | RFC 3629 §3       | Byte-level validation at the boundary is security-mandatory, not optional ("MUST protect against decoding invalid sequences"; §10 motivates why)       |
 | 3   | Object member names SHOULD be unique; software behavior on duplicates is unpredictable                   | RFC 8259 §4       | Duplicate-name policy is a required design decision — decided: `DuplicatePolicy` ships first-wins (default), last-wins, and reject (the I-JSON stance) |
 | 4   | I-JSON: UTF-8 only, no duplicates, numbers within IEEE 754 binary64                                      | RFC 7493          | The candidate "strict mode" contract, already standardized — no need to invent one                                                                     |
 | 5   | Numbers beyond IEEE 754 binary64 precision lose interoperability; NaN and Infinity are not JSON          | RFC 8259 §6       | The number model (binary64, integer preservation, bignum policy) is a load-bearing design choice                                                       |
@@ -91,7 +91,7 @@ Spec-imposed facts the design must answer to. Where the spec leaves a choice, th
 Re-fetch at any time:
 
 ```bash
-for n in 8259 7493 6901 8785 3629; do
+for n in 8259 7493 6901 6902 7396 8785 8949 3629; do
     curl -fsSL "https://www.rfc-editor.org/rfc/rfc${n}.txt" -o "rfc${n}.txt"
 done
 ```

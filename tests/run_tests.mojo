@@ -154,8 +154,10 @@ def test_utf8_rejects_attack_bytes() raises:
 # --- _internal/stage_one: differential vs a scalar mirror ----------------------
 #
 # The scalar mirror below implements the same emit semantics one byte at a
-# time: structurals outside strings plus unescaped quotes; escape state is
-# context-free (as in the SIMD math). Any divergence is a stage-1 bug.
+# time: structurals outside strings, unescaped quotes, and atom STARTS —
+# the first byte of every scalar run outside strings (quotes excluded, as
+# in the SIMD math); escape state is context-free (as in the SIMD math).
+# Any divergence is a stage-1 bug.
 
 
 def _is_structural_byte(byte: UInt8) -> Bool:
@@ -169,11 +171,21 @@ def _is_structural_byte(byte: UInt8) -> Bool:
     )
 
 
+def _is_whitespace_byte(byte: UInt8) -> Bool:
+    return (
+        byte == UInt8(ord(" "))
+        or byte == UInt8(0x09)
+        or byte == UInt8(0x0A)
+        or byte == UInt8(0x0D)
+    )
+
+
 def _scalar_structural_index(text: String) -> List[UInt32]:
     var bytes_view = text.as_bytes()
     var positions = List[UInt32]()
     var in_string = False
     var escaped = False
+    var prev_scalar = False
     for i in range(len(bytes_view)):
         var byte = bytes_view[i]
         var this_escaped = escaped
@@ -184,8 +196,22 @@ def _scalar_structural_index(text: String) -> List[UInt32]:
         if byte == UInt8(ord('"')) and not this_escaped:
             in_string = not in_string
             positions.append(UInt32(i))
+            prev_scalar = False
         elif _is_structural_byte(byte) and not in_string:
             positions.append(UInt32(i))
+            prev_scalar = False
+        else:
+            # Scalar: outside strings, not whitespace, and never a quote
+            # byte (escaped quotes are quote-classified, exactly as the
+            # SIMD scalar mask excludes the whole quote category).
+            var scalar = (
+                not in_string
+                and not _is_whitespace_byte(byte)
+                and byte != UInt8(ord('"'))
+            )
+            if scalar and not prev_scalar:
+                positions.append(UInt32(i))
+            prev_scalar = scalar
     return positions^
 
 
@@ -220,6 +246,15 @@ def test_stage_one_matches_scalar_mirror() raises:
     _differential_case('"\\\\"')  # escaped backslash then closing quote
     _differential_case('"\\\\\\""')  # backslash, escaped quote, close
     _differential_case('{"long":"' + "a" * 200 + '","after":[3,4]}')
+    # Atom starts (pseudo-structurals).
+    _differential_case("true")
+    _differential_case("  -12.5e+3  ")
+    _differential_case("[1,22,333]")
+    _differential_case('{"a":null,"b":[true,false]}')
+    _differential_case("tru")  # invalid document; index math still agrees
+    _differential_case("1 2")  # two scalar runs, two starts
+    _differential_case("[" + "9" * 200 + "]")  # one atom spanning blocks
+    _differential_case('\\"x')  # context-free escape outside any string
 
 
 def test_stage_one_cross_block_boundaries() raises:
@@ -500,6 +535,75 @@ def test_bom_policy() raises:
     except error:
         rejected = True
     _assert(rejected, "I-JSON mode rejects the BOM")
+
+
+def test_bom_before_bare_atom_root() raises:
+    # The BOM and an abutting atom form ONE scalar run in stage 1, whose
+    # only start position lies inside the BOM; the dispatcher must still
+    # find the atom at `start` (audit regression case).
+    var bom_number = List[UInt8]()
+    bom_number.append(UInt8(0xEF))
+    bom_number.append(UInt8(0xBB))
+    bom_number.append(UInt8(0xBF))
+    bom_number.extend(String("1").as_bytes())
+    var doc = loads(String(unsafe_from_utf8=bom_number))
+    _assert(doc.root().to[Int64]() == 1, "BOM + bare number root parses")
+
+    var bom_literal = List[UInt8]()
+    bom_literal.append(UInt8(0xEF))
+    bom_literal.append(UInt8(0xBB))
+    bom_literal.append(UInt8(0xBF))
+    bom_literal.extend(String("true").as_bytes())
+    var doc_literal = loads(String(unsafe_from_utf8=bom_literal))
+    _assert(doc_literal.root().to[Bool](), "BOM + bare literal root parses")
+
+
+def test_exponent_overflow_does_not_wrap() raises:
+    # A grammar-valid exponent of any length must classify as overflow or
+    # underflow — never wrap Int64 and invert the class (audit finding).
+    var huge = loads(String("1e9999999999999999999"))
+    _assert(
+        not huge.root().fits_float64(),
+        "gigantic positive exponent is overflow, not zero",
+    )
+    var tiny = loads(String("1e-9999999999999999999"))
+    _assert(
+        tiny.root().to[Float64]() == 0.0,
+        "gigantic negative exponent underflows to zero",
+    )
+
+
+def test_i_json_rejects_noncharacters() raises:
+    # RFC 7493 §2.1 — escaped, paired-escape, and raw spellings all reject
+    # under I-JSON; STANDARD mode accepts every one (RFC 8259).
+    comptime ij = ParseOptions(mode=ParseMode.I_JSON)
+    var cases = List[String]()
+    cases.append(String('"\\uFFFF"'))
+    cases.append(String('"\\uFDD0"'))
+    cases.append(String('"\\uDBFF\\uDFFF"'))  # U+10FFFF via surrogate pair
+    for i in range(len(cases)):
+        var rejected = False
+        try:
+            _ = parse[ij](cases[i].copy())
+        except error:
+            rejected = True
+        _assert(rejected, "I-JSON rejects noncharacter: " + cases[i])
+        _ = loads(cases[i].copy())  # standard mode accepts
+
+    var raw = List[UInt8]()
+    raw.append(UInt8(ord('"')))
+    raw.append(UInt8(0xEF))  # U+FFFE, raw three-byte spelling
+    raw.append(UInt8(0xBF))
+    raw.append(UInt8(0xBE))
+    raw.append(UInt8(ord('"')))
+    var raw_text = String(unsafe_from_utf8=raw)
+    var raw_rejected = False
+    try:
+        _ = parse[ij](raw_text.copy())
+    except error:
+        raw_rejected = True
+    _assert(raw_rejected, "I-JSON rejects a raw noncharacter")
+    _ = loads(raw_text.copy())  # standard mode accepts
 
 
 def test_try_parse_twins() raises:
@@ -1204,6 +1308,27 @@ def main() raises:
         print("  PASS test_bom_policy")
     except error:
         print("  FAIL test_bom_policy:", String(error))
+        failures += 1
+
+    try:
+        test_bom_before_bare_atom_root()
+        print("  PASS test_bom_before_bare_atom_root")
+    except error:
+        print("  FAIL test_bom_before_bare_atom_root:", String(error))
+        failures += 1
+
+    try:
+        test_exponent_overflow_does_not_wrap()
+        print("  PASS test_exponent_overflow_does_not_wrap")
+    except error:
+        print("  FAIL test_exponent_overflow_does_not_wrap:", String(error))
+        failures += 1
+
+    try:
+        test_i_json_rejects_noncharacters()
+        print("  PASS test_i_json_rejects_noncharacters")
+    except error:
+        print("  FAIL test_i_json_rejects_noncharacters:", String(error))
         failures += 1
 
     try:

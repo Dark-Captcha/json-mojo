@@ -52,7 +52,9 @@ comptime B_LF_BYTE: UInt8 = UInt8(0x0A)
 comptime B_CR_BYTE: UInt8 = UInt8(0x0D)
 
 
-def validate_utf8_span(bytes: Span[UInt8, _], a: Int, b: Int) raises:
+def validate_utf8_span[
+    reject_noncharacters: Bool = False
+](bytes: Span[UInt8, _], a: Int, b: Int) raises:
     var ptr = bytes.unsafe_ptr()
     var i = a
     comptime W = 64
@@ -119,6 +121,14 @@ def validate_utf8_span(bytes: Span[UInt8, _], a: Int, b: Int) raises:
             raise Error(
                 "json.parse: UTF-8 surrogate code point at byte " + String(i)
             )
+        comptime if reject_noncharacters:
+            # RFC 7493 §2.1: I-JSON strings must not contain noncharacters
+            # (U+FDD0..U+FDEF and the last two code points of every plane).
+            if (cp >= 0xFDD0 and cp <= 0xFDEF) or (cp & 0xFFFE) == 0xFFFE:
+                raise Error(
+                    "json.parse: noncharacter in I-JSON string at byte "
+                    + String(i)
+                )
         i += seqlen
 
 

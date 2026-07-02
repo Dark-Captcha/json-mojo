@@ -6,15 +6,7 @@
 # members skipped. JSON5 `Infinity`/`NaN` encode as float64 ±inf/nan (CBOR
 # holds them; `decode` of such bytes rejects, because JSON cannot).
 
-from json._internal.number import (
-    json5_number_to_float,
-    json5_number_to_int64,
-    json5_number_to_uint64,
-    parse_float,
-    parse_int64,
-    parse_uint64,
-)
-from json._internal.tape import (
+from json.tape import (
     FLAG_ESCAPED,
     FLAG_REENCODE,
     FLAG_SHADOWED,
@@ -24,12 +16,19 @@ from json._internal.tape import (
     TAG_NUMBER,
     TAG_OBJECT,
     TAG_STRING,
+    decode_escaped_string,
+    decode_json5_string,
     entry_a,
     entry_flags,
     entry_tag,
+    json5_number_to_float,
+    json5_number_to_int64,
+    json5_number_to_uint64,
+    parse_float,
+    parse_int64,
+    parse_uint64,
     skip_past,
 )
-from json._internal.unicode import decode_escaped_string, decode_json5_string
 from json.document import Document
 from json.value import Value
 

@@ -186,6 +186,25 @@ def main() raises:
         )
         fails += 1
     try:
+        var d = decode(_unhex("14000000026d0008000000c3a9220ae6b0b40000"))
+        if dumps(d) == '{"m":"é\\"\\n水"}':
+            accepts += 1
+        else:
+            print(
+                "FAIL accept:",
+                "14000000026d0008000000c3a9220ae6b0b40000",
+                "got",
+                dumps(d),
+            )
+            fails += 1
+    except error:
+        print(
+            "FAIL accept raised:",
+            "14000000026d0008000000c3a9220ae6b0b40000",
+            String(error),
+        )
+        fails += 1
+    try:
         var d = decode(_unhex("0d000000087400010866000000"))
         if dumps(d) == '{"t":true,"f":false}':
             accepts += 1
@@ -550,6 +569,26 @@ def main() raises:
         print(
             "FAIL roundtrip raised:",
             "11000000026400050000006122620a0000",
+            String(error),
+        )
+        fails += 1
+    try:
+        var r1 = decode(_unhex("14000000026d0008000000c3a9220ae6b0b40000"))
+        var r2 = decode(bson_dumps(r1))
+        if dumps(r2) == '{"m":"é\\"\\n水"}':
+            roundtrips += 1
+        else:
+            print(
+                "FAIL roundtrip:",
+                "14000000026d0008000000c3a9220ae6b0b40000",
+                "got",
+                dumps(r2),
+            )
+            fails += 1
+    except error:
+        print(
+            "FAIL roundtrip raised:",
+            "14000000026d0008000000c3a9220ae6b0b40000",
             String(error),
         )
         fails += 1

@@ -9,8 +9,9 @@
 # depth is bounded by the parsed document's own `max_depth`.
 #
 # Equality (`test` op, RFC 6902 §4.6) compares strings by decoded value and
-# numbers numerically: Int64-to-Int64 and UInt64-to-UInt64 exactly, mixed or
-# fractional via Float64, and digits beyond every 64-bit range by raw text.
+# numbers numerically EXACTLY: same-kind 64-bit integers directly; every
+# other pairing by normalized decimal components (sign, significant digits,
+# exponent) — no rounding step, so no width-dependent false verdicts.
 
 from json.document import Document, loads, parse
 from json.serializer import Serializer, dumps
@@ -64,7 +65,10 @@ def _apply_one[
     if name == "move":
         var source = _tokens(op["from"].to[String]())
         if _same_tokens(source, path):
-            return dumps(doc)  # moving to the same location has no effect
+            # RFC 6902 §4.4: the "from" location MUST exist even when the
+            # move has no effect — resolve it before returning unchanged.
+            _ = _resolve(doc, source, 0)
+            return dumps(doc)
         if _is_prefix(source, path):
             raise Error("json.patch: cannot move a value into its own child")
         var lifted = dumps(_resolve(doc, source, 0))
@@ -95,7 +99,10 @@ comptime _MODE_REMOVE: Int = 2
 
 
 def _tokens(pointer: String) raises -> List[String]:
-    """RFC 6901 pointer → reference tokens (`~1` → `/`, `~0` → `~`).
+    """RFC 6901 pointer → reference tokens (`~1` → `/`, `~0` → `~`),
+    split and unescaped byte-wise: a pointer is UTF-8 text and a token
+    keeps its bytes exactly (RFC 6901 §3 specifies characters — re-encoding
+    each byte as its own code point would corrupt every non-ASCII name).
     The empty pointer addresses the whole document (zero tokens)."""
     var out = List[String]()
     if pointer.byte_length() == 0:
@@ -103,24 +110,24 @@ def _tokens(pointer: String) raises -> List[String]:
     var bytes = pointer.as_bytes()
     if bytes[0] != _P_SLASH:
         raise Error("json.patch: a non-empty pointer must start with '/'")
-    var token = String("")
+    var token = List[UInt8]()
     var i = 1
     while i <= pointer.byte_length():
         if i == pointer.byte_length() or bytes[i] == _P_SLASH:
-            out.append(token.copy())
-            token = String("")
+            out.append(String(unsafe_from_utf8=token))
+            token = List[UInt8]()
         elif bytes[i] == _P_TILDE:
             if i + 1 >= pointer.byte_length():
                 raise Error("json.patch: dangling '~' in pointer")
             if bytes[i + 1] == _P_0:
-                token += "~"
+                token.append(_P_TILDE)
             elif bytes[i + 1] == _P_1:
-                token += "/"
+                token.append(_P_SLASH)
             else:
                 raise Error("json.patch: invalid '~' escape in pointer")
             i += 1
         else:
-            token += chr(Int(bytes[i]))
+            token.append(bytes[i])
         i += 1
     return out^
 
@@ -169,6 +176,24 @@ def _array_index(token: String, length: Int, allow_end: Bool) raises -> Int:
     return value
 
 
+def _require_unique[
+    origin: ImmutOrigin
+](value: Value[origin], token: String) raises:
+    """RFC 6901 §4: a pointer whose referenced member name is not unique in
+    its object does not resolve — evaluation fails rather than guessing.
+    (`Value.__getitem__` itself is documented first-wins; pointer
+    evaluation is stricter by specification.)"""
+    var seen = 0
+    for member in value.members():
+        if member.key() == token:
+            seen += 1
+            if seen > 1:
+                raise Error(
+                    "json.patch: pointer is ambiguous — duplicate member"
+                    " name: " + token
+                )
+
+
 def _resolve[
     origin: ImmutOrigin
 ](value: Value[origin], path: List[String], depth: Int) raises -> Value[origin]:
@@ -176,6 +201,7 @@ def _resolve[
     if depth == len(path):
         return value.copy()
     if value.kind() == ValueKind.OBJECT:
+        _require_unique(value, path[depth])
         return _resolve(value[path[depth]], path, depth + 1)
     if value.kind() == ValueKind.ARRAY:
         var i = _array_index(path[depth], value.__len__(), False)
@@ -207,6 +233,7 @@ def _splice[
     var token = path[depth].copy()
     var last = depth + 1 == len(path)
     if value.kind() == ValueKind.OBJECT:
+        _require_unique(value, token)
         var out = String("{")
         var found = False
         var first = True
@@ -284,6 +311,93 @@ def _splice[
 # --- RFC 6902 §4.6 equality --------------------------------------------------------
 
 
+struct _Decimal(Copyable, Movable):
+    """A number spelling normalized for exact comparison: sign, significant
+    digits (no leading or trailing zeros), and the decimal exponent scaling
+    them. Zero is canonical: positive, empty digits, exponent 0."""
+
+    var negative: Bool
+    var digits: String
+    var exponent: Int
+
+    def __init__(out self, *, negative: Bool, digits: String, exponent: Int):
+        self.negative = negative
+        self.digits = digits
+        self.exponent = exponent
+
+
+def _decompose(text: String) raises -> _Decimal:
+    """Normalize one RFC 8259 number spelling (`dumps` output — grammar
+    already validated) to its exact decimal components."""
+    var bytes = text.as_bytes()
+    var n = len(bytes)
+    var i = 0
+    var negative = False
+    if i < n and bytes[i] == UInt8(ord("-")):
+        negative = True
+        i += 1
+    var digits = List[UInt8]()
+    var fraction_length = 0
+    while i < n and bytes[i] >= _P_0 and bytes[i] <= _P_9:
+        digits.append(bytes[i])
+        i += 1
+    if i < n and bytes[i] == UInt8(ord(".")):
+        i += 1
+        while i < n and bytes[i] >= _P_0 and bytes[i] <= _P_9:
+            digits.append(bytes[i])
+            fraction_length += 1
+            i += 1
+    var explicit_exponent = 0
+    var exponent_negative = False
+    if i < n and (bytes[i] == UInt8(ord("e")) or bytes[i] == UInt8(ord("E"))):
+        i += 1
+        if i < n and (
+            bytes[i] == UInt8(ord("+")) or bytes[i] == UInt8(ord("-"))
+        ):
+            exponent_negative = bytes[i] == UInt8(ord("-"))
+            i += 1
+        while i < n and bytes[i] >= _P_0 and bytes[i] <= _P_9:
+            explicit_exponent = explicit_exponent * 10 + Int(bytes[i] - _P_0)
+            if explicit_exponent > (1 << 40):
+                raise Error("json.patch: number exponent out of range")
+            i += 1
+    if exponent_negative:
+        explicit_exponent = -explicit_exponent
+
+    # value = digits × 10^(explicit − fraction_length); strip zeros.
+    var exponent = explicit_exponent - fraction_length
+    var first = 0
+    while first < len(digits) and digits[first] == _P_0:
+        first += 1
+    var last = len(digits)
+    while last > first and digits[last - 1] == _P_0:
+        last -= 1
+        exponent += 1
+    if first == last:
+        return _Decimal(negative=False, digits=String(""), exponent=0)
+    var significant = List[UInt8]()
+    for k in range(first, last):
+        significant.append(digits[k])
+    return _Decimal(
+        negative=negative,
+        digits=String(unsafe_from_utf8=significant),
+        exponent=exponent,
+    )
+
+
+def _decimal_equal(a: String, b: String) raises -> Bool:
+    """Exact decimal equality of two number spellings — no rounding step,
+    so no width-dependent false verdicts (RFC 6902 §4.6 "numerically
+    equal")."""
+    var da = _decompose(a)
+    var db = _decompose(b)
+    return (
+        da.negative == db.negative
+        and da.exponent == db.exponent
+        and da.digits == db.digits
+    )
+
+
 def _values_equal[
     o1: ImmutOrigin, o2: ImmutOrigin
 ](a: Value[o1], b: Value[o2]) raises -> Bool:
@@ -301,11 +415,12 @@ def _values_equal[
             return a.to[Int64]() == b.to[Int64]()
         if a.fits_uint64() and b.fits_uint64():
             return a.to[UInt64]() == b.to[UInt64]()
-        if a.fits_float64() and b.fits_float64():
-            return a.to[Float64]() == b.to[Float64]()
-        # Beyond every 64-bit interpretation on at least one side: exact
-        # digits are all that is left to compare.
-        return dumps(a) == dumps(b)
+        # Mixed spellings, fractions, or magnitudes past 64 bits: compare
+        # the DECIMAL VALUES exactly — each spelling normalizes to
+        # (sign, significant digits, exponent) and the components compare.
+        # No rounding step exists, so Float64's 2^53 artifacts and
+        # overflow-to-text fallbacks cannot produce a false verdict.
+        return _decimal_equal(dumps(a), dumps(b))
     if ka == ValueKind.ARRAY:
         if a.__len__() != b.__len__():
             return False
