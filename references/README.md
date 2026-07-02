@@ -1,6 +1,6 @@
 # References — Standards Governing json-mojo
 
-> **Version:** 1.4.0 | **Updated:** 2026-07-03
+> **Version:** 1.5.0 | **Updated:** 2026-07-03
 
 Vendored and linked specifications for every byte this library parses or emits, with the constraints each imposes. Entries marked _candidate_ await the design discussion; the spec facts themselves are settled.
 

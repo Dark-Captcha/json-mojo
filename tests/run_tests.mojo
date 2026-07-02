@@ -711,6 +711,33 @@ def test_dumps_subtree_and_pretty() raises:
     _assert(pretty == expected, "pretty two-space form, got: " + pretty)
 
 
+def test_dumps_indent_width_and_byte() raises:
+    # Python indent=N / JS space=N parity: width, tab fill, and the
+    # Python indent=0 newlines-without-indentation form.
+    var doc = loads('{"a":[1]}')
+    var four = dumps[options=SerializeOptions(pretty=True, indent=4)](doc)
+    _assert(
+        four == '{\n    "a": [\n        1\n    ]\n}',
+        "four-space indent, got: " + four,
+    )
+    var tabbed = dumps[
+        options=SerializeOptions(pretty=True, indent=1, indent_byte=0x09)
+    ](doc)
+    _assert(
+        tabbed == '{\n\t"a": [\n\t\t1\n\t]\n}',
+        "tab indent, got: " + tabbed,
+    )
+    var bare = dumps[options=SerializeOptions(pretty=True, indent=0)](doc)
+    _assert(
+        bare == '{\n"a": [\n1\n]\n}',
+        "indent=0 emits newlines only, got: " + bare,
+    )
+    _assert(
+        dumps[options=SerializeOptions(indent=8)](doc) == '{"a":[1]}',
+        "indent is inert while pretty is off",
+    )
+
+
 def test_serializer_escapes_new_text() raises:
     var s = Serializer()
     s.begin_object()
@@ -1378,6 +1405,13 @@ def main() raises:
         print("  PASS test_dumps_subtree_and_pretty")
     except error:
         print("  FAIL test_dumps_subtree_and_pretty:", String(error))
+        failures += 1
+
+    try:
+        test_dumps_indent_width_and_byte()
+        print("  PASS test_dumps_indent_width_and_byte")
+    except error:
+        print("  FAIL test_dumps_indent_width_and_byte:", String(error))
         failures += 1
 
     try:

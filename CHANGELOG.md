@@ -2,10 +2,13 @@
 
 All notable changes to json-mojo. Format follows Keep a Changelog; versions follow SemVer once past 1.0.
 
-## [Unreleased]
+## [1.5.0] — 2026-07-03
+
+Stringify parity: `dumps` grows the Python `indent=N` / JS `space=N` knobs as comptime fields — every combination monomorphizes and the compact path never carries a pretty branch.
 
 ### Added
 
+- `SerializeOptions.indent` (default 2) and `SerializeOptions.indent_byte` (default space): indent width per depth level under `pretty=True`; `indent=0` emits newlines without indentation (Python's `indent=0`) and `indent_byte=0x09` covers `indent="\t"` / `space="\t"`. Default output is byte-identical to 1.4.0. Deliberately absent, with reasons in the docstring: `sort_keys` (the future RFC 8785 canonical mode owns key ordering), replacer/default callbacks (the `Value`/serde transform layer's job), `allow_nan` (fixed by contract), `check_circular` (the tape is acyclic by construction).
 - `examples/formats.mojo` — a runnable tour of the JSON5 dialect, the three binary siblings (MessagePack, BSON, CBOR round-trips through the one tape), and the RFC 6902/7396 patch functions; `pixi run example` now runs both example files.
 
 ### Fixed

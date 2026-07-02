@@ -1,6 +1,6 @@
 # Architecture — json-mojo
 
-> **Version:** 1.4.0 | **Updated:** 2026-07-03
+> **Version:** 1.5.0 | **Updated:** 2026-07-03
 
 Purpose, binding contracts, and system map of json-mojo — the criteria every structural decision in this library is judged against.
 

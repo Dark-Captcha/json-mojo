@@ -1,6 +1,6 @@
 # json-mojo
 
-> **Version:** 1.4.0 | **Updated:** 2026-07-03
+> **Version:** 1.5.0 | **Updated:** 2026-07-03
 
 Spec-exact, SIMD-accelerated JSON for Mojo — a lazy tape engine with Python-easy verbs, zero dependencies, and a measured performance record.
 
@@ -77,7 +77,7 @@ Fourteen functions, ten types (ARCHITECTURE.md, Public Surface):
 | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `parse[options](var text)` / `loads(var text)` / `loads_bytes(var bytes)` | Text or bytes → `Document`, taken by move (`parse(body^)`) — zero copies                                                                                                                        |
 | `try_parse[options]` / `try_deserialize[T]`                               | Non-raising twins returning `Optional`                                                                                                                                                          |
-| `dumps[options](doc)`                                                     | Re-emit a document — compact by default, `SerializeOptions(pretty=True)` for two-space indent                                                                                                   |
+| `dumps[options](doc)`                                                     | Re-emit a document — compact by default; `SerializeOptions(pretty=True, indent=4)` for Python/JS-style indentation (`indent_byte=0x09` for tabs; `indent=0` = newlines only)                    |
 | `deserialize[T]` / `serialize`                                            | Typed serde; plain structs derive both directions via reflection, no trait required                                                                                                             |
 | `Document`                                                                | Owns the input and the tape; exposes its root's access surface directly                                                                                                                         |
 | `Value` / `ValueKind`                                                     | The lazy cursor: `kind()`, `to[T]()`, `["key"]` / `[index]`, `elements()`, `members()`, `at("/pointer")`, `fits_int64/uint64/float64`                                                           |

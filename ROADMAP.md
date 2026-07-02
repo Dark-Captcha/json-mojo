@@ -1,6 +1,6 @@
 # Roadmap
 
-> **Version:** 1.4.0 | **Updated:** 2026-07-03
+> **Version:** 1.5.0 | **Updated:** 2026-07-03
 
 Direction after v1.3.0, ordered by leverage. PERF.md's weakness table is the performance source of truth; ARCHITECTURE.md's extension tiers are the scope source of truth. As of 1.3.0 every shipped format is BIDIRECTIONAL: JSON and JSON5 in, JSON out (JSON5 normalizes); MessagePack, BSON, and CBOR decode AND encode over the stable tape contract.
 

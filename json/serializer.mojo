@@ -64,7 +64,6 @@ from json.options import SerializeOptions
 from json.value import Value
 
 
-comptime _INDENT_WIDTH: Int = 2
 comptime _NIBBLE: UInt8 = UInt8(0x0F)
 comptime _HEX = String("0123456789abcdef")
 
@@ -137,7 +136,7 @@ def _write_tape[
         # below), so the pretty branch matches the recursive layout exactly.
         while top_active and entry == top_end:
             comptime if options.pretty:
-                _write_newline_indent(writer, len(stack))
+                _write_newline_indent[options](writer, len(stack))
             writer.byte(B_RBRACE if top_is_object else B_RBRACK)
             if len(stack) > 0:
                 var parent = stack.pop()
@@ -161,7 +160,7 @@ def _write_tape[
                 writer.byte(B_COMMA)
             top_emitted += 1
             comptime if options.pretty:
-                _write_newline_indent(writer, len(stack) + 1)
+                _write_newline_indent[options](writer, len(stack) + 1)
             if top_is_object:
                 if (entry_flags(word0) & FLAG_REENCODE) != UInt8(0):
                     _reencode_string(
@@ -235,10 +234,12 @@ def _write_tape[
 
 
 @always_inline
-def _write_newline_indent(mut writer: ChunkWriter, depth: Int):
+def _write_newline_indent[
+    options: SerializeOptions
+](mut writer: ChunkWriter, depth: Int):
     writer.byte(B_LF)
-    for _ in range(_INDENT_WIDTH * depth):
-        writer.byte(B_SPACE)
+    for _ in range(options.indent * depth):
+        writer.byte(options.indent_byte)
 
 
 def _reencode_string(

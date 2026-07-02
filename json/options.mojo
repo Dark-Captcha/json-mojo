@@ -4,6 +4,8 @@
 # specialized parser and disabled branches erase (.probe/SYNTAX.md,
 # finding 16). The `dialect` field joins post-v1 without breaking a caller.
 
+from json._internal.bytes import B_SPACE
+
 
 struct DuplicatePolicy(Comparable, Copyable, Movable, TrivialRegisterPassable):
     """What an object does about repeated member names. `FIRST_WINS` is the
@@ -178,11 +180,36 @@ struct ParseOptions(Copyable, Movable, TrivialRegisterPassable):
 
 
 struct SerializeOptions(Copyable, Movable, TrivialRegisterPassable):
-    """Serialization knobs. Version one: compact or pretty with a fixed
-    two-space indent; further fields join without breaking callers."""
+    """Serialization knobs — comptime, so every combination monomorphizes
+    and the compact path never carries a pretty branch.
+
+    `pretty` switches indented emission on; `indent` is the width per depth
+    level (Python `indent=N`, JS `space=N`; `0` emits newlines without
+    indentation, matching Python's `indent=0`) and `indent_byte` the fill
+    byte (`B_TAB` covers Python `indent="\\t"` / JS `space="\\t"`).
+
+    Deliberately absent, with reasons: `sort_keys` belongs to the future
+    JCS (RFC 8785) canonical mode — a half-canonical knob invites
+    confusion; replacer/default callbacks are the `Value`/serde transform
+    layer's job (function-typed comptime parameters are unusable on this
+    pin, .probe/SYNTAX.md finding 8); `allow_nan` is fixed by contract
+    (`dumps` refuses non-finite); `check_circular` is free — the tape is
+    acyclic by construction. Further fields join without breaking
+    callers."""
 
     var pretty: Bool
+    var indent: Int
+    var indent_byte: UInt8
 
     @always_inline
-    def __init__(out self, *, pretty: Bool = False):
+    def __init__(
+        out self,
+        *,
+        pretty: Bool = False,
+        indent: Int = 2,
+        indent_byte: UInt8 = B_SPACE,
+    ):
+        debug_assert(indent >= 0, "indent width must be non-negative")
         self.pretty = pretty
+        self.indent = indent
+        self.indent_byte = indent_byte
