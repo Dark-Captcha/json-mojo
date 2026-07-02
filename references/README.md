@@ -31,16 +31,16 @@ Cite entries from this index in module headers rather than restating spec text.
 
 ## Vendored RFCs
 
-| File          | Specification                      | Status            | Governs in json-mojo                                                                    |
-| ------------- | ---------------------------------- | ----------------- | --------------------------------------------------------------------------------------- |
-| `rfc8259.txt` | The JSON Data Interchange Format   | Internet Standard | The grammar itself: values, objects, arrays, numbers, strings, whitespace, escapes      |
-| `rfc7493.txt` | The I-JSON Message Format          | Proposed Std      | The interoperable strict profile: UTF-8 only, no duplicate names, IEEE-754-safe numbers |
-| `rfc6901.txt` | JSON Pointer                       | Proposed Std      | The standard path syntax (`/a/b/0`, `~0`/`~1` escaping) for addressing into a document  |
-| `rfc8785.txt` | JSON Canonicalization Scheme (JCS) | Informational     | Canonical serialization: I-JSON subset, ECMAScript number formatting, sorted keys       |
-| `rfc8949.txt` | Concise Binary Object Representation     | STD 94        | The `cbor` sibling: major types, heads, indefinite lengths, Appendix A vectors seed its gate, Appendix D half-precision algorithm |
-| `rfc3629.txt` | UTF-8, a Transformation Format     | STD 63            | Byte-level validity of every string this library accepts or produces                    |
-| `rfc6902.txt` | JSON Patch                         | Proposed Std      | `apply_patch`: the six-operation patch format over the `Value` surface (tier 3)         |
-| `rfc7396.txt` | JSON Merge Patch                   | Proposed Std      | `merge_patch`: object-merge semantics with `null`-removal (tier 3)                      |
+| File          | Specification                        | Status            | Governs in json-mojo                                                                                                              |
+| ------------- | ------------------------------------ | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `rfc8259.txt` | The JSON Data Interchange Format     | Internet Standard | The grammar itself: values, objects, arrays, numbers, strings, whitespace, escapes                                                |
+| `rfc7493.txt` | The I-JSON Message Format            | Proposed Std      | The interoperable strict profile: UTF-8 only, no duplicate names, IEEE-754-safe numbers                                           |
+| `rfc6901.txt` | JSON Pointer                         | Proposed Std      | The standard path syntax (`/a/b/0`, `~0`/`~1` escaping) for addressing into a document                                            |
+| `rfc8785.txt` | JSON Canonicalization Scheme (JCS)   | Informational     | Canonical serialization: I-JSON subset, ECMAScript number formatting, sorted keys                                                 |
+| `rfc8949.txt` | Concise Binary Object Representation | STD 94            | The `cbor` sibling: major types, heads, indefinite lengths, Appendix A vectors seed its gate, Appendix D half-precision algorithm |
+| `rfc3629.txt` | UTF-8, a Transformation Format       | STD 63            | Byte-level validity of every string this library accepts or produces                                                              |
+| `rfc6902.txt` | JSON Patch                           | Proposed Std      | `apply_patch`: the six-operation patch format over the `Value` surface (tier 3)                                                   |
+| `rfc7396.txt` | JSON Merge Patch                     | Proposed Std      | `merge_patch`: object-merge semantics with `null`-removal (tier 3)                                                                |
 
 ---
 
@@ -51,10 +51,10 @@ Cite entries from this index in module headers rather than restating spec text.
 | ECMA-404, 2nd edition   | Ecma International | The same grammar as RFC 8259, without interoperability guidance — 8259 is the operative citation here                                                       | <https://ecma-international.org/publications-and-standards/standards/ecma-404/> |
 | IEEE 754-2019           | IEEE               | The number model interoperable JSON is limited to (binary64)                                                                                                | <https://standards.ieee.org/ieee/754/6210/>                                     |
 | JSONTestSuite           | Nicolas Seriot     | The de-facto parser conformance corpus (y/n/i cases) — clone into `references/JSONTestSuite` to run `tests/run_suite.sh` (gitignored, like all clones here) | <https://github.com/nst/JSONTestSuite>                                          |
-| BSON Specification v1.1 | bsonspec.org       | The `bson` sibling: element types, document framing, the cstring/int32-length rules its policies cite                                                        | <https://bsonspec.org/spec.html>                                                |
-| MessagePack spec        | msgpack org        | The `msgpack` sibling: the format-byte table its dispatch (and named constants) mirror                                                                       | <https://github.com/msgpack/msgpack/blob/master/spec.md>                        |
-| JSON5 (spec.json5.org)  | json5 org          | `Dialect.JSON5` (tier 1): the exact grammar the dedicated scanner implements, over ES5.1 lexical productions                                | <https://spec.json5.org/>                                                       |
-| json5-tests             | json5 org          | The JSON5 conformance corpus — clone into `references/json5-tests` for `tests/run_json5_suite.sh` (gitignored)                              | <https://github.com/json5/json5-tests>                                          |
+| BSON Specification v1.1 | bsonspec.org       | The `bson` sibling: element types, document framing, the cstring/int32-length rules its policies cite                                                       | <https://bsonspec.org/spec.html>                                                |
+| MessagePack spec        | msgpack org        | The `msgpack` sibling: the format-byte table its dispatch (and named constants) mirror                                                                      | <https://github.com/msgpack/msgpack/blob/master/spec.md>                        |
+| JSON5 (spec.json5.org)  | json5 org          | `Dialect.JSON5` (tier 1): the exact grammar the dedicated scanner implements, over ES5.1 lexical productions                                                | <https://spec.json5.org/>                                                       |
+| json5-tests             | json5 org          | The JSON5 conformance corpus — clone into `references/json5-tests` for `tests/run_json5_suite.sh` (gitignored)                                              | <https://github.com/json5/json5-tests>                                          |
 | RFC 9535 JSONPath       | IETF               | Query expressions over JSON — linked for scope discussion, not vendored (62 pages)                                                                          | <https://www.rfc-editor.org/rfc/rfc9535.txt>                                    |
 | RFC 7464 Text Sequences | IETF               | RS-delimited JSON streams (`application/json-seq`) — candidate streaming surface                                                                            | <https://www.rfc-editor.org/rfc/rfc7464.txt>                                    |
 | RFC 4627                | IETF (obsoleted)   | Lineage only: the original media-type registration, obsoleted through RFC 7159 into 8259                                                                    | <https://www.rfc-editor.org/rfc/rfc4627.txt>                                    |

@@ -8,7 +8,7 @@ version = "1.4.0"
 [tasks]
 test = "mojo run -I . tests/run_tests.mojo && mojo run -I . tests/msgpack_generated.mojo && mojo run -I . tests/bson_generated.mojo && mojo run -I . tests/cbor_generated.mojo"
 benchmark = "mojo run -I . benchmarks/run_benchmarks.mojo"
-example = "mojo run -I . examples/basic_usage.mojo"
+example = "mojo run -I . examples/basic_usage.mojo && mojo run -I . examples/formats.mojo"
 
 [dependencies]
 mojo-compiler = ">=1.0.0b3.dev2026070206,<2"

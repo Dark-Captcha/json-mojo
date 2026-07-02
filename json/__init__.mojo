@@ -11,6 +11,7 @@ from json.document import Document, loads, loads_bytes, parse, try_parse
 from json.io import dump, dumps_lines, dumps_seq, load, loads_lines, loads_seq
 from json.patch import apply_patch, merge_patch
 from json.options import (
+    Dialect,
     DuplicatePolicy,
     ParseMode,
     ParseOptions,

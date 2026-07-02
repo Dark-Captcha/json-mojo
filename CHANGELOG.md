@@ -2,6 +2,16 @@
 
 All notable changes to json-mojo. Format follows Keep a Changelog; versions follow SemVer once past 1.0.
 
+## [Unreleased]
+
+### Added
+
+- `examples/formats.mojo` — a runnable tour of the JSON5 dialect, the three binary siblings (MessagePack, BSON, CBOR round-trips through the one tape), and the RFC 6902/7396 patch functions; `pixi run example` now runs both example files.
+
+### Fixed
+
+- `Dialect` is re-exported from the package root as the public surface always documented — `from json import Dialect` works; previously only the internal `json.options` path had it (the new example caught it).
+
 ## [1.4.0] — 2026-07-03
 
 ### Added
@@ -13,7 +23,7 @@ All notable changes to json-mojo. Format follows Keep a Changelog; versions foll
 
 - **Parse is 1.5× faster on structural corpora and 1.2× on numbers.** Stage 1 emits atom STARTS as pseudo-structural positions (simdjson-style scalar-edge mask with a cross-block carry), so stage 2 dispatches every value from a position and never re-scans whitespace gaps; number validation fuses span discovery with grammar checking — each byte touched once. citm 1.11–1.29 → 1.62–1.73 GB/s; canada 0.86–0.88 → 0.96–1.11 GB/s; twitter flat (string-bound). The scalar mirror gate grew the same pseudo-structural semantics.
 - Tape writes go through a raw pointer over a PROVEN exact capacity bound (every entry consumes its own index position) — the per-append growth branch is dead, `debug_assert` re-proves the bound on every input in assertion builds.
-- Parse-error paths are now real RFC 6901: member-name tokens are decoded and `~`/`/`-escaped (`{"a/b":{"m~n":…}}` fails "in /a~1b/m~0n/…", previously the raw, unescaped, byte-mangled spelling).
+- Parse-error paths are now real RFC 6901: member-name tokens are decoded and `~`/`/`-escaped (`{"a/b":{"m~n":…}}` fails `in /a~1b/m~0n/2`, previously the raw, unescaped, byte-mangled spelling).
 
 ### Fixed
 
