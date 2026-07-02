@@ -86,6 +86,47 @@ struct ParseMode(Comparable, Copyable, Movable, TrivialRegisterPassable):
     comptime I_JSON: ParseMode = ParseMode(code=UInt8(1))
 
 
+struct Dialect(Comparable, Copyable, Movable, TrivialRegisterPassable):
+    """Which TEXT grammar is being read (extension tier 1): `JSON`
+    (RFC 8259) or `JSON5` (json5.org — comments, trailing commas, unquoted
+    identifier keys, single quotes, extended numbers and escapes). `mode`
+    answers "how strict within it"; binary wire formats are front-end
+    libraries, never dialect values."""
+
+    var _code: UInt8
+
+    @always_inline
+    def __init__(out self, *, code: UInt8):
+        self._code = code
+
+    @always_inline
+    def __eq__(self, other: Dialect) -> Bool:
+        return self._code == other._code
+
+    @always_inline
+    def __ne__(self, other: Dialect) -> Bool:
+        return self._code != other._code
+
+    @always_inline
+    def __lt__(self, other: Dialect) -> Bool:
+        return self._code < other._code
+
+    @always_inline
+    def __le__(self, other: Dialect) -> Bool:
+        return self._code <= other._code
+
+    @always_inline
+    def __gt__(self, other: Dialect) -> Bool:
+        return self._code > other._code
+
+    @always_inline
+    def __ge__(self, other: Dialect) -> Bool:
+        return self._code >= other._code
+
+    comptime JSON: Dialect = Dialect(code=UInt8(0))
+    comptime JSON5: Dialect = Dialect(code=UInt8(1))
+
+
 struct ParseOptions(Copyable, Movable, TrivialRegisterPassable):
     """The reserved comptime slot (extension tier 1). Defaults per the
     hot-path analysis in ARCHITECTURE.md."""
@@ -93,6 +134,7 @@ struct ParseOptions(Copyable, Movable, TrivialRegisterPassable):
     var max_depth: Int
     var duplicates: DuplicatePolicy
     var mode: ParseMode
+    var dialect: Dialect
 
     @always_inline
     def __init__(
@@ -101,10 +143,12 @@ struct ParseOptions(Copyable, Movable, TrivialRegisterPassable):
         max_depth: Int = 1024,
         duplicates: DuplicatePolicy = DuplicatePolicy.FIRST_WINS,
         mode: ParseMode = ParseMode.STANDARD,
+        dialect: Dialect = Dialect.JSON,
     ):
         self.max_depth = max_depth
         self.duplicates = duplicates
         self.mode = mode
+        self.dialect = dialect
 
     @always_inline
     def rejects_duplicates(self) -> Bool:

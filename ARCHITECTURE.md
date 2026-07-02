@@ -1,6 +1,6 @@
 # Architecture — json-mojo
 
-> **Version:** 1.1.0 | **Updated:** 2026-07-03
+> **Version:** 1.2.0 | **Updated:** 2026-07-03
 
 Purpose, binding contracts, and system map of json-mojo — the criteria every structural decision in this library is judged against.
 
@@ -114,7 +114,7 @@ RFC 8259 defines exactly six kinds; the tape alphabet is those six tags and neve
 | `null`    | Tag only                                                                                                                                                                                                                                            |
 | `boolean` | Tag carries the value                                                                                                                                                                                                                               |
 | `number`  | Raw text span into the input — parsed into a concrete type only when asked. `Int64`, `UInt64`, `Float64`, and arbitrary-precision integers are four _interpretations_ of one kind, not four kinds; the parser never converts, so it never truncates |
-| `string`  | Raw (still-escaped) span, UTF-8-validated at stage 1; unescaped on demand — escape-free strings slice out of the input zero-copy                                                                                                                    |
+| `string`  | Raw (still-escaped) span, UTF-8-validated at parse; unescaped on demand — escape-free strings slice out of the input zero-copy. JSON5 spellings RFC 8259 cannot re-emit carry `FLAG_REENCODE`: readers use the JSON5 decoder and `dumps` normalizes them                                                                                                                    |
 | `array`   | Tag plus a skip-link to the container's end — lean tape, forward iteration is the cheap direction                                                                                                                                                   |
 | `object`  | Tag plus a skip-link to the container's end — member lookup scans forward and early-exits, honoring the parse-time duplicate policy (members shadowed under `last_wins` are invisible to lookup, iteration, `len`, and `dumps`)                     |
 
@@ -133,7 +133,7 @@ value.to[Float64]()    # to the FromJson conformance of the target
 value.to[MyStruct]()   # structs derive via reflection — no conformance
 ```
 
-The honest mechanics under the gateway, settled by probes (`.probe/SYNTAX.md`, findings 20–36): `__extension` retroactive conformance EXISTS on this toolchain, so primitives (`Bool`, `String`, every SIMD scalar width) and `Optional` conform to `FromJson` directly, and all containers conform to `ToJson`. Two toolchain limits shape the rest: extensions must live in the trait's own module, and `List`/`Dict` **deserialization** remains a recorded limitation — the ownership wall itself fell (finding 36: an accumulating raising body is legal when the raise path consumes the partial container via `destroy_with`; the working implementation is retained in `.probe/probe_container_walls.mojo`), but re-landing is blocked by a compiler ICE on cross-module `conforms_to(List[X], FromJson)` queries on this pin, re-attempted each nightly. The typed read path for containers is the cursor walk (`elements()` / `members()`); their serialization works fully. Plain structs need no conformance at all in either direction — `to[T]`, `deserialize[T]`, and `serialize` derive them through the reflection field walk; conforming to a trait is only for custom control.
+The honest mechanics under the gateway, settled by probes (`.probe/SYNTAX.md`, findings 20–37): `__extension` retroactive conformance EXISTS on this toolchain, so primitives (`Bool`, `String`, every SIMD scalar width) and `Optional` conform to `FromJson` directly, and all containers conform to `ToJson`. Two toolchain limits shape the rest: extensions must live in the trait's own module, and `List`/`Dict` **deserialization** remains a recorded limitation — the ownership wall itself fell (finding 36: an accumulating raising body is legal when the raise path consumes the partial container via `destroy_with`; the working implementation is retained in `.probe/probe_container_walls.mojo`), but re-landing is blocked by a compiler ICE on cross-module `conforms_to(List[X], FromJson)` queries on this pin, re-attempted each nightly. The typed read path for containers is the cursor walk (`elements()` / `members()`); their serialization works fully. Plain structs need no conformance at all in either direction — `to[T]`, `deserialize[T]`, and `serialize` derive them through the reflection field walk; conforming to a trait is only for custom control.
 
 Numbers get one honest introspection surface instead of guesswork: `kind()`, plus — for numbers — whether the value fits `Int64`, fits `UInt64`, converts to a finite `Float64` (IEEE 754 round-to-even — overflow is the only refusal), or exceeds all three; the raw span is always available.
 
@@ -177,6 +177,10 @@ def loads_seq(var text) raises -> List[Document]     # RFC 7464 text sequences
 def dumps_seq(docs) raises -> String
 def load(path) raises -> Document                    # file sugar
 def dump(doc, path) raises
+
+# 1.2.0, additive: extension tier 3's first residents
+def apply_patch(doc, patch) raises -> Document       # RFC 6902
+def merge_patch(doc, patch) raises -> Document       # RFC 7396
 ```
 
 (`loads_bytes` is a recorded freeze amendment: the fuzz layer requires a bytes
@@ -190,6 +194,7 @@ a decoding layer.)
 | `duplicates` | `first_wins` | Early-exit member lookup on a skip-link tape; parsing pays nothing, so `len()` and iteration see members as written. `last_wins` (Python semantics) pays per-key detection at parse time and shadows the superseded member on the tape — lookup stays early-exit; `reject` pays the same detection and raises |
 | `max_depth`  | `1024`       | One register compare per container; stage 2 walks iteratively, so the value is pure bomb defense                                                                                                                                                                                                              |
 | `mode`       | `standard`   | `i_json` (RFC 7493) flips duplicates to reject and the BOM to an error                                                                                                                                                                                                                                        |
+| `dialect`    | `json`       | Which TEXT grammar is read (tier 1): `json5` opts into the full JSON5 grammar via a dedicated scalar scanner onto the same tape; the RFC 8259 engine and its promise are untouched by erasure                                                                                                                  |
 
 Duplicate detection (`last_wins` / `reject` / `i_json`) compares member names by CHARACTER (RFC 7493 §2.3) — an escaped spelling of the same name cannot evade it — matching the lookup path, which decodes escaped names before comparing. Two behaviors are fixed rather than fields: a leading BOM is skipped (a once-per-document 3-byte check; RFC 8259 §8.1 sanctions ignoring it, and `i_json` rejects it), and trailing non-whitespace after the document is rejected (once-per-document EOF check; trailing whitespace itself is grammar-legal).
 
@@ -207,7 +212,7 @@ Grammar supersets join post-v1 as a typed field with a default that preserves ev
 | `FromJson` / `ToJson`               | The conversion protocol (Type Scheme, Layer 2)                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `Serializer`                        | What `ToJson` implementations write into — Writer-backed                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
-Twenty-four public names in total — fourteen functions (the eight frozen at 0.1.0: `parse`, `try_parse`, `loads`, `loads_bytes`, `dumps`, `deserialize`, `try_deserialize`, `serialize`; six added additively at 1.1.0: `loads_lines`, `dumps_lines`, `loads_seq`, `dumps_seq`, `load`, `dump`), ten types. `Member`, the yield type of `members()`, is package-public but deliberately un-exported — callers meet it through iteration, like a stdlib dict entry. File input/output sugar (`load`/`dump`) is deferred alongside JSON Lines: the primary audience holds bytes, not paths.
+Twenty-seven public names in total — sixteen functions (the eight frozen at 0.1.0: `parse`, `try_parse`, `loads`, `loads_bytes`, `dumps`, `deserialize`, `try_deserialize`, `serialize`; six added at 1.1.0: `loads_lines`, `dumps_lines`, `loads_seq`, `dumps_seq`, `load`, `dump`; two at 1.2.0: `apply_patch`, `merge_patch`), eleven types (`Dialect` joined at 1.2.0). The `msgpack` sibling package adds `msgpack.decode` under its own namespace. `Member`, the yield type of `members()`, is package-public but deliberately un-exported — callers meet it through iteration, like a stdlib dict entry. File input/output sugar (`load`/`dump`) is deferred alongside JSON Lines: the primary audience holds bytes, not paths.
 
 ### Decisions This Surface Settles
 
@@ -257,7 +262,7 @@ Non-goals are rulings on the v1 core, not locked doors. Each class of exclusion 
 
 ## Open Decisions
 
-None. Every design question raised in this document has been settled by ruling or resolved by probe — the record lives in `.probe/SYNTAX.md` (findings 13–19 from the probe phase; findings 20–36 taught by the compiler during the build, including the `__extension` rules that shaped Layer 2's final form).
+None. Every design question raised in this document has been settled by ruling or resolved by probe — the record lives in `.probe/SYNTAX.md` (findings 13–19 from the probe phase; findings 20–37 taught by the compiler during the build, including the `__extension` rules that shaped Layer 2's final form).
 
 ---
 
@@ -277,6 +282,7 @@ json/
 ├── value.mojo           # Value, ValueKind, Member, iterators, FromJson + conformances,
 │                        #   the to[T] gateway, the reflection read walk
 ├── io.mojo              # JSON Lines, RFC 7464 sequences, load/dump file sugar
+├── patch.mojo           # RFC 6902 + RFC 7396 over the public Value surface (tier 3)
 ├── serde.mojo           # ToJson + conformances, deserialize / try_deserialize / serialize
 ├── serializer.mojo      # Serializer + dumps (iterative tape re-emission) + SIMD escaping
 └── _internal/
@@ -284,6 +290,8 @@ json/
     ├── simd.mojo        # lane idioms: classification tables, prefix-XOR, escape scanner
     ├── stage_one.mojo   # the SIMD structural indexer
     ├── tape.mojo        # stage 2: grammar validation + tape build + lazy UTF-8 gate
+    ├── json5.mojo       # Dialect.JSON5 scalar scanner + tape builder (tier 1)
+    ├── unicode_id.mojo  # GENERATED by tests/gen_unicode_id.py (ES5.1 identifiers)
     ├── unicode.mojo     # UTF-8 validation, escape decoding
     ├── number.mojo      # Eisel-Lemire in; integer writers; stdlib shortest-round-trip
     │                    #   floats out via the Writer protocol
@@ -296,6 +304,7 @@ Dependency direction — imports point down, with one deliberate upward edge out
 ```text
 __init__ ──→ { document, options, serde, serializer, value }
 serde ──→ { document, options, serializer, value }     io ──→ { document, serializer }
+patch ──→ { document, serializer, value }     json5 ──→ { bytes, tape, unicode, unicode_id, options }
 document ──→ { options, value, _internal/{simd, stage_one, tape} }
 serializer ──→ { document, options, value, _internal/{bytes, number, tape, writer} }
 value ──→ _internal/{number, tape, unicode}

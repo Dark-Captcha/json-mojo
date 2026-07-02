@@ -16,12 +16,14 @@ from json.serializer import dumps
 comptime _LF: UInt8 = UInt8(0x0A)
 comptime _CR: UInt8 = UInt8(0x0D)
 comptime _RS: UInt8 = UInt8(0x1E)  # RFC 7464 record separator
+comptime _SPACE: UInt8 = UInt8(0x20)
+comptime _TAB: UInt8 = UInt8(0x09)
 
 
 def _is_blank(bytes: Span[UInt8, _], start: Int, end: Int) -> Bool:
     for i in range(start, end):
         var b = bytes[i]
-        if b != UInt8(0x20) and b != UInt8(0x09) and b != _CR and b != _LF:
+        if b != _SPACE and b != _TAB and b != _CR and b != _LF:
             return False
     return True
 

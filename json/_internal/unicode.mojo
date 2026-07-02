@@ -32,15 +32,35 @@ from json._internal.bytes import (
 )
 
 
+# UTF-8 structure (RFC 3629 §3) as named comptime masks: a lead byte's
+# high bits encode the sequence length; continuations are 10xxxxxx.
+comptime HIGH_BIT: UInt8 = UInt8(0x80)  # ASCII / non-ASCII boundary
+comptime _CONT_MASK: UInt8 = UInt8(0xC0)
+comptime _CONT_BITS: UInt8 = UInt8(0x80)  # 10xxxxxx
+comptime _LEAD2_MASK: UInt8 = UInt8(0xE0)
+comptime _LEAD2_BITS: UInt8 = UInt8(0xC0)  # 110xxxxx
+comptime _LEAD3_MASK: UInt8 = UInt8(0xF0)
+comptime _LEAD3_BITS: UInt8 = UInt8(0xE0)  # 1110xxxx
+comptime _LEAD4_MASK: UInt8 = UInt8(0xF8)
+comptime _LEAD4_BITS: UInt8 = UInt8(0xF0)  # 11110xxx
+comptime _PAYLOAD2: UInt8 = UInt8(0x1F)
+comptime _PAYLOAD3: UInt8 = UInt8(0x0F)
+comptime _PAYLOAD4: UInt8 = UInt8(0x07)
+comptime _PAYLOAD_CONT: UInt8 = UInt8(0x3F)
+comptime _NIBBLE: UInt8 = UInt8(0x0F)
+comptime B_LF_BYTE: UInt8 = UInt8(0x0A)
+comptime B_CR_BYTE: UInt8 = UInt8(0x0D)
+
+
 def validate_utf8_span(bytes: Span[UInt8, _], a: Int, b: Int) raises:
     var ptr = bytes.unsafe_ptr()
     var i = a
     comptime W = 64
-    var v80 = SIMD[DType.uint8, W](UInt8(0x80))
+    var v80 = SIMD[DType.uint8, W](HIGH_BIT)
     var v0 = SIMD[DType.uint8, W](UInt8(0))
     while i < b:
         var c = ptr[i]
-        if c < UInt8(0x80):
+        if c < HIGH_BIT:
             # ASCII — try to skip a whole SIMD chunk if it is all ASCII.
             if i + W <= b:
                 var chunk = ptr.load[width=W](i)
@@ -56,18 +76,18 @@ def validate_utf8_span(bytes: Span[UInt8, _], a: Int, b: Int) raises:
         var seqlen: Int
         var mincp: Int
         var cp: Int
-        if (c & UInt8(0xE0)) == UInt8(0xC0):
+        if (c & _LEAD2_MASK) == _LEAD2_BITS:
             seqlen = 2
             mincp = 0x80
-            cp = Int(c & UInt8(0x1F))
-        elif (c & UInt8(0xF0)) == UInt8(0xE0):
+            cp = Int(c & _PAYLOAD2)
+        elif (c & _LEAD3_MASK) == _LEAD3_BITS:
             seqlen = 3
             mincp = 0x800
-            cp = Int(c & UInt8(0x0F))
-        elif (c & UInt8(0xF8)) == UInt8(0xF0):
+            cp = Int(c & _PAYLOAD3)
+        elif (c & _LEAD4_MASK) == _LEAD4_BITS:
             seqlen = 4
             mincp = 0x10000
-            cp = Int(c & UInt8(0x07))
+            cp = Int(c & _PAYLOAD4)
         else:
             raise Error(
                 "json.parse: invalid UTF-8 lead byte 0x"
@@ -81,12 +101,12 @@ def validate_utf8_span(bytes: Span[UInt8, _], a: Int, b: Int) raises:
             )
         for k in range(1, seqlen):
             var cb = ptr[i + k]
-            if (cb & UInt8(0xC0)) != UInt8(0x80):
+            if (cb & _CONT_MASK) != _CONT_BITS:
                 raise Error(
                     "json.parse: invalid UTF-8 continuation byte at byte "
                     + String(i + k)
                 )
-            cp = (cp << 6) | Int(cb & UInt8(0x3F))
+            cp = (cp << 6) | Int(cb & _PAYLOAD_CONT)
         if cp < mincp:
             raise Error(
                 "json.parse: overlong UTF-8 encoding at byte " + String(i)
@@ -106,8 +126,8 @@ def _hex2(x: UInt8) -> String:
     comptime HEX = "0123456789abcdef"
     var hb = HEX.as_bytes()
     var s = String("")
-    s += chr(Int(hb[Int((x >> UInt8(4)) & UInt8(0x0F))]))
-    s += chr(Int(hb[Int(x & UInt8(0x0F))]))
+    s += chr(Int(hb[Int((x >> UInt8(4)) & _NIBBLE)]))
+    s += chr(Int(hb[Int(x & _NIBBLE)]))
     return s
 
 
@@ -183,14 +203,104 @@ def _utf8_encode(mut out: List[UInt8], cp: Int):
     if cp < 0x80:
         out.append(UInt8(cp))
     elif cp < 0x800:
-        out.append(UInt8(0xC0 | (cp >> 6)))
-        out.append(UInt8(0x80 | (cp & 0x3F)))
+        out.append(_LEAD2_BITS | UInt8(cp >> 6))
+        out.append(_CONT_BITS | UInt8(cp & 0x3F))
     elif cp < 0x10000:
-        out.append(UInt8(0xE0 | (cp >> 12)))
-        out.append(UInt8(0x80 | ((cp >> 6) & 0x3F)))
-        out.append(UInt8(0x80 | (cp & 0x3F)))
+        out.append(_LEAD3_BITS | UInt8(cp >> 12))
+        out.append(_CONT_BITS | UInt8((cp >> 6) & 0x3F))
+        out.append(_CONT_BITS | UInt8(cp & 0x3F))
     else:
-        out.append(UInt8(0xF0 | (cp >> 18)))
-        out.append(UInt8(0x80 | ((cp >> 12) & 0x3F)))
-        out.append(UInt8(0x80 | ((cp >> 6) & 0x3F)))
-        out.append(UInt8(0x80 | (cp & 0x3F)))
+        out.append(_LEAD4_BITS | UInt8(cp >> 18))
+        out.append(_CONT_BITS | UInt8((cp >> 12) & 0x3F))
+        out.append(_CONT_BITS | UInt8((cp >> 6) & 0x3F))
+        out.append(_CONT_BITS | UInt8(cp & 0x3F))
+
+
+def decode_json5_string(bytes: Span[UInt8, _], a: Int, b: Int) -> String:
+    """Decode a JSON5-validated string body (single- or double-quoted
+    content, `Dialect.JSON5`) into an owned String. Trusted like the RFC
+    decoder above: `_scan_string5` already validated every escape."""
+    var out = List[UInt8](capacity=b - a)
+    var i = a
+    while i < b:
+        var c = bytes[i]
+        if c != B_BSLASH:
+            out.append(c)
+            i += 1
+            continue
+        i += 1
+        var e = bytes[i]
+        if e == B_U:
+            var code = _hex4_trusted(bytes, i + 1)
+            i += 5
+            if code >= 0xD800 and code <= 0xDBFF:
+                var low = _hex4_trusted(bytes, i + 2)
+                i += 6
+                code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)
+            _utf8_encode(out, code)
+            continue
+        if e == UInt8(0x78):  # \xHH
+            var hi = _hex_digit_trusted(bytes[i + 1])
+            var lo = _hex_digit_trusted(bytes[i + 2])
+            _utf8_encode(out, (hi << 4) | lo)
+            i += 3
+            continue
+        if e == B_LF_BYTE or e == B_CR_BYTE:
+            # Line continuation: consumed, contributes nothing.
+            if e == B_CR_BYTE and i + 1 < b and bytes[i + 1] == B_LF_BYTE:
+                i += 2
+            else:
+                i += 1
+            continue
+        if (
+            e == UInt8(0xE2)
+            and i + 2 < b
+            and bytes[i + 1] == UInt8(0x80)
+            and (bytes[i + 2] == UInt8(0xA8) or bytes[i + 2] == UInt8(0xA9))
+        ):
+            i += 3  # \LS or \PS continuation
+            continue
+        if e == B_QUOTE:
+            out.append(B_QUOTE)
+        elif e == B_BSLASH:
+            out.append(B_BSLASH)
+        elif e == B_SLASH:
+            out.append(B_SLASH)
+        elif e == B_B:
+            out.append(CTRL_BS)
+        elif e == B_F:
+            out.append(CTRL_FF)
+        elif e == B_N:
+            out.append(CTRL_LF)
+        elif e == B_R:
+            out.append(CTRL_CR)
+        elif e == B_T:
+            out.append(CTRL_TAB)
+        elif e == UInt8(0x76):  # \v
+            out.append(UInt8(0x0B))
+        elif e == B_0:
+            out.append(UInt8(0x00))
+        elif e < HIGH_BIT:
+            out.append(e)  # SourceCharacter escaping to itself
+        else:
+            # Self-escaped multi-byte character: copy its full sequence.
+            var step = 2
+            if (e & _LEAD3_MASK) == _LEAD3_BITS:
+                step = 3
+            elif (e & _LEAD4_MASK) == _LEAD4_BITS:
+                step = 4
+            for k in range(step):
+                out.append(bytes[i + k])
+            i += step
+            continue
+        i += 1
+    return String(unsafe_from_utf8=out)
+
+
+@always_inline
+def _hex_digit_trusted(c: UInt8) -> Int:
+    if c >= B_0 and c <= B_9:
+        return Int(c - B_0)
+    if c >= B_A:
+        return Int(c - B_A) + 10
+    return Int(c - B_A_UPPER) + 10

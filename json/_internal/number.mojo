@@ -404,10 +404,10 @@ def write_int_i64(mut w: ChunkWriter, value: Int64):
         tmp[pos + 1] = pairs[r * 2 + 1]
     else:
         pos -= 1
-        tmp[pos] = UInt8(0x30) + UInt8(Int(v))
+        tmp[pos] = B_0 + UInt8(Int(v))
     if neg:
         pos -= 1
-        tmp[pos] = UInt8(0x2D)  # '-'
+        tmp[pos] = B_MINUS
     w.span(Span(ptr=tmp.unsafe_ptr() + pos, length=24 - pos))
 
 
@@ -433,7 +433,7 @@ def write_uint_u64(mut w: ChunkWriter, value: UInt64):
         tmp[pos + 1] = pairs[r * 2 + 1]
     else:
         pos -= 1
-        tmp[pos] = UInt8(0x30) + UInt8(Int(v))
+        tmp[pos] = B_0 + UInt8(Int(v))
     w.span(Span(ptr=tmp.unsafe_ptr() + pos, length=24 - pos))
 
 
@@ -489,3 +489,160 @@ def parse_uint64(
         magnitude = magnitude * 10 + digit
         i += 1
     return magnitude
+
+
+# --- JSON5 access-time numbers (Dialect.JSON5, FLAG_REENCODE lexemes) --------------
+#
+# Only spans the RFC 8259 grammar could never produce reach these: hex
+# (`0xFF`), `Infinity`/`NaN`, a leading `+`, or a bare leading/trailing dot.
+# Decimal transforms are TEXTUAL (value-exact); hex converts through UInt64
+# when it fits and through Float64 beyond (ES numbers are doubles).
+
+
+def _json5_parts(bytes: Span[UInt8, _], start: Int, mut negative: Bool) -> Int:
+    """Index of the first payload byte past any sign; sets `negative`."""
+    var i = start
+    negative = False
+    if bytes[i] == B_MINUS:
+        negative = True
+        i += 1
+    elif bytes[i] == B_PLUS:
+        i += 1
+    return i
+
+
+def _is_hex_payload(bytes: Span[UInt8, _], i: Int, end: Int) -> Bool:
+    return (
+        i + 1 < end
+        and bytes[i] == B_0
+        and (bytes[i + 1] == UInt8(0x78) or bytes[i + 1] == UInt8(0x58))
+    )
+
+
+def json5_hex_to_uint(
+    bytes: Span[UInt8, _], i: Int, end: Int
+) -> Optional[UInt64]:
+    """Hex digits after `0x` as a UInt64; None once it overflows."""
+    var value = UInt64(0)
+    var k = i + 2
+    while k < end:
+        var c = bytes[k]
+        var d: UInt64
+        if c >= B_0 and c <= B_9:
+            d = UInt64(c - B_0)
+        elif c >= UInt8(0x61) and c <= UInt8(0x66):
+            d = UInt64(c - UInt8(0x61)) + 10
+        else:
+            d = UInt64(c - UInt8(0x41)) + 10
+        if value > (UInt64.MAX - d) / 16:
+            return None
+        value = value * 16 + d
+        k += 1
+    return value
+
+
+def json5_number_to_float(
+    bytes: Span[UInt8, _], start: Int, end: Int
+) -> Optional[Float64]:
+    """A FLAG_REENCODE number span as Float64 (Infinity/NaN included —
+    the introspection surface reports them non-finite)."""
+    var negative = False
+    var i = _json5_parts(bytes, start, negative)
+    var sign = Float64(-1.0) if negative else Float64(1.0)
+    if i < end and bytes[i] == UInt8(0x49):  # Infinity
+        return sign * _bits_to_f64(UInt64(0x7FF0000000000000))
+    if i < end and bytes[i] == UInt8(0x4E):  # NaN
+        return _bits_to_f64(UInt64(0x7FF8000000000000))
+    if _is_hex_payload(bytes, i, end):
+        var exact = json5_hex_to_uint(bytes, i, end)
+        if exact:
+            return sign * Float64(exact.value())
+        var value = Float64(0.0)
+        var k = i + 2
+        while k < end:
+            var c = bytes[k]
+            var d: Int
+            if c >= B_0 and c <= B_9:
+                d = Int(c - B_0)
+            elif c >= UInt8(0x61) and c <= UInt8(0x66):
+                d = Int(c - UInt8(0x61)) + 10
+            else:
+                d = Int(c - UInt8(0x41)) + 10
+            value = value * 16.0 + Float64(d)
+            k += 1
+        return sign * value
+    # Decimal with a bare dot or a stripped '+': normalize textually.
+    var text = List[UInt8](capacity=end - start + 2)
+    if negative:
+        text.append(B_MINUS)
+    if i < end and bytes[i] == B_DOT:
+        text.append(B_0)
+    var k2 = i
+    while k2 < end:
+        text.append(bytes[k2])
+        k2 += 1
+    if len(text) > 0 and text[len(text) - 1] == B_DOT:
+        text.append(B_0)
+    return parse_float(text, 0, len(text))
+
+
+def json5_number_to_int64(
+    bytes: Span[UInt8, _], start: Int, end: Int
+) -> Optional[Int64]:
+    var negative = False
+    var i = _json5_parts(bytes, start, negative)
+    if _is_hex_payload(bytes, i, end):
+        var value = json5_hex_to_uint(bytes, i, end)
+        if not value:
+            return None
+        if negative:
+            if value.value() > UInt64(1) << 63:
+                return None
+            if value.value() == UInt64(1) << 63:
+                return Int64.MIN
+            return -Int64(value.value())
+        if value.value() > UInt64(Int64.MAX):
+            return None
+        return Int64(value.value())
+    if i < end and (bytes[i] == UInt8(0x49) or bytes[i] == UInt8(0x4E)):
+        return None  # Infinity / NaN
+    # Decimal: dots/exponents disqualify exact int64 reads; '+' strips.
+    var k = i
+    while k < end:
+        var c = bytes[k]
+        if c == B_DOT or c == B_E_LOWER or c == B_E_UPPER:
+            return None
+        k += 1
+    var text = List[UInt8](capacity=end - i + 1)
+    if negative:
+        text.append(B_MINUS)
+    k = i
+    while k < end:
+        text.append(bytes[k])
+        k += 1
+    return parse_int64(text, 0, len(text))
+
+
+def json5_number_to_uint64(
+    bytes: Span[UInt8, _], start: Int, end: Int
+) -> Optional[UInt64]:
+    var negative = False
+    var i = _json5_parts(bytes, start, negative)
+    if negative:
+        return None
+    if _is_hex_payload(bytes, i, end):
+        return json5_hex_to_uint(bytes, i, end)
+    if i < end and (bytes[i] == UInt8(0x49) or bytes[i] == UInt8(0x4E)):
+        return None
+    var k = i
+    while k < end:
+        var c = bytes[k]
+        if c == B_DOT or c == B_E_LOWER or c == B_E_UPPER:
+            return None
+        k += 1
+    var text = List[UInt8](capacity=end - i)
+    k = i
+    while k < end:
+        text.append(bytes[k])
+        k += 1
+    return parse_uint64(text, 0, len(text))

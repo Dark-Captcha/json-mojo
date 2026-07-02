@@ -1,6 +1,6 @@
 # PERF — json-mojo Performance Record
 
-> **Version:** 1.1.0 | **Updated:** 2026-07-03
+> **Version:** 1.2.0 | **Updated:** 2026-07-03
 
 The measured scorecard the Performance Promise (ARCHITECTURE.md) is judged by: corpus and micro throughput versus the incumbents, where parse time goes, how throughput scales across cores, and the named weaknesses — no silent wins.
 
@@ -29,7 +29,7 @@ The measured scorecard the Performance Promise (ARCHITECTURE.md) is judged by: c
 | Protocol         | Min-of-N wall time via `perf_counter_ns`; the input copy feeding move-in ownership is inside the clock for micro cells (matching the prototype's accounting) and outside for corpus cells. Cells under ~100 B discretize on timer granularity — their best-of quantizes to a few nanosecond ticks |
 | Corpus           | `twitter.json` (632 KB), `citm_catalog.json` (1.7 MB), `canada.json` (2.2 MB) — the exact bytes in the EmberJson clone, so both libraries measure identical input                                                                                                                                 |
 | Variance         | Numbers are reported as observed ranges where runs disagree: absolute throughput drifted up to ~10% across this session (boost/thermal state — the untouched `dumps` path moved with it). Comparisons within one run are exact                                                                    |
-| Correctness gate | Every number below was taken with all gates green: 36/36 unit, JSONTestSuite 283/0 with 95/95 `dumps ∘ loads` round-trip, float differential 1,500/0, fuzz 750/0, UTF-8 differential 424/0                                                                                                        |
+| Correctness gate | Every number below was taken with all gates green: 40/40 unit, JSONTestSuite 283/0 with 95/95 `dumps ∘ loads` round-trip, json5-tests 112/0, MessagePack vectors 55/0, float differential 1,500/0, fuzz 750/0, UTF-8 differential 424/0. Dialects and siblings never touch the measured RFC 8259 path (comptime erasure) |
 
 ---
 

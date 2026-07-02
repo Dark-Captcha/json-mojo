@@ -6,4 +6,5 @@
 references/json/
 references/EmberJson/
 references/JSONTestSuite/
+references/json5-tests/
 .build/

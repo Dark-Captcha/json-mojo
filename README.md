@@ -1,6 +1,6 @@
 # json-mojo
 
-> **Version:** 1.1.0 | **Updated:** 2026-07-03
+> **Version:** 1.2.0 | **Updated:** 2026-07-03
 
 Spec-exact, SIMD-accelerated JSON for Mojo — a lazy tape engine with Python-easy verbs, zero dependencies, and a measured performance record.
 
@@ -85,6 +85,9 @@ Fourteen functions, ten types (ARCHITECTURE.md, Public Surface):
 | `FromJson` / `ToJson` / `Serializer`                                      | The conversion protocol, for custom control                                                                                           |
 | `loads_lines` / `dumps_lines` / `loads_seq` / `dumps_seq`                 | JSON Lines (NDJSON) and RFC 7464 text sequences — one `Document` per record, errors name the record (1.1.0)                           |
 | `load(path)` / `dump(doc, path)`                                          | File sugar — bytes reach this library's validator directly (1.1.0)                                                                    |
+| `apply_patch` / `merge_patch`                                              | RFC 6902 JSON Patch and RFC 7396 Merge Patch, over the public cursor surface (1.2.0)                                                  |
+| `ParseOptions(dialect=Dialect.JSON5)`                                      | The full JSON5 grammar — comments, trailing commas, unquoted keys, single quotes, hex, `Infinity` — `dumps` normalizes to JSON (1.2.0) |
+| `msgpack.decode(bytes)`                                                    | MessagePack → `Document` over the stable tape contract; `dumps` of the result is msgpack → JSON transcoding (1.2.0)                   |
 
 Errors carry the byte offset **and** the RFC 6901 path of the failure:
 
@@ -107,7 +110,9 @@ Every release re-earns all of it (commands in PERF.md, Reproducing):
 | Structural fuzz                             | 400/400 byte-exact round-trips; 350/350 hostile inputs without a crash        |
 | UTF-8 differential (strict RFC 3629 oracle) | 424 / 424                                                                     |
 | `dumps ∘ loads` idempotence                 | 95/95 corpus files, byte-exact (part of the suite gate's RESULT line)         |
-| Unit battery                                | 36 / 36                                                                       |
+| json5-tests (Dialect.JSON5)                 | 112 accept+reject cases / **0 failures**                                      |
+| MessagePack vectors (generated)             | 36 accept / 5 float / 14 reject — 0 failures                                  |
+| Unit battery                                | 40 / 40                                                                       |
 
 ---
 
@@ -145,7 +150,7 @@ Stated, not hidden:
 | ARCHITECTURE.md      | Purpose, contracts, type scheme, public surface, system map                |
 | PERF.md              | The measured record: scorecards, stage breakdown, scaling, weaknesses      |
 | references/README.md | The standards map — five vendored RFCs and the constraints drawn from each |
-| .probe/SYNTAX.md     | 36 verified toolchain findings this library is built on                    |
+| .probe/SYNTAX.md     | 37 verified toolchain findings this library is built on                    |
 
 ---
 

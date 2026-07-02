@@ -29,8 +29,46 @@
 from std.bit import count_trailing_zeros
 from std.memory.unsafe import pack_bits
 
+from json._internal.bytes import (
+    B_0,
+    B_1,
+    B_9,
+    B_A,
+    B_A_UPPER,
+    B_B,
+    B_BSLASH,
+    B_COMMA,
+    B_CR,
+    B_DOT,
+    B_E_LOWER,
+    B_E_UPPER,
+    B_F,
+    B_F_UPPER,
+    B_L,
+    B_LBRACE,
+    B_LBRACK,
+    B_LF,
+    B_MINUS,
+    B_N,
+    B_PLUS,
+    B_QUOTE,
+    B_R,
+    B_RBRACE,
+    B_RBRACK,
+    B_S,
+    B_SLASH,
+    B_SPACE,
+    B_T,
+    B_TAB,
+    B_U,
+)
 from json._internal.stage_one import StructuralIndex
-from json._internal.unicode import decode_escaped_string, validate_utf8_span
+from json._internal.unicode import (
+    HIGH_BIT,
+    decode_escaped_string,
+    decode_json5_string,
+    validate_utf8_span,
+)
 from json.options import ParseOptions
 
 
@@ -48,6 +86,12 @@ comptime FLAG_SHADOWED: UInt8 = UInt8(2)
 # (MessagePack/CBOR/BSON) materialize number text there (ARCHITECTURE.md,
 # extension tiers; ROADMAP.md).
 comptime FLAG_ARENA: UInt8 = UInt8(4)
+# JSON5 lexemes whose raw span is NOT valid RFC 8259 content (single-quoted
+# strings with embedded quotes/escapes, JSON5-only escapes, hex numbers,
+# Infinity/NaN, leading '+' or bare-dot decimals): readers decode via the
+# JSON5 decoder and `dumps` re-encodes to standard JSON instead of re-emitting
+# the span verbatim.
+comptime FLAG_REENCODE: UInt8 = UInt8(8)
 
 comptime _A_MASK: UInt64 = (UInt64(1) << 48) - 1
 
@@ -146,12 +190,7 @@ def _describe_path(stack: List[_Frame], bytes: Span[UInt8, _]) -> String:
 @always_inline
 def _is_whitespace(byte: UInt8) -> Bool:
     # RFC 8259 §2: space, tab, line feed, carriage return — nothing else.
-    return (
-        byte == UInt8(0x20)
-        or byte == UInt8(0x09)
-        or byte == UInt8(0x0A)
-        or byte == UInt8(0x0D)
-    )
+    return byte == B_SPACE or byte == B_TAB or byte == B_LF or byte == B_CR
 
 
 @always_inline
@@ -165,7 +204,7 @@ def _digit_run_end(bytes: Span[UInt8, _], start: Int, end: Int) -> Int:
     var i = start
     while i < end:
         var chunk = ptr.load[width=W](i)
-        var is_digit = chunk.ge(UInt8(ord("0"))) & chunk.le(UInt8(ord("9")))
+        var is_digit = chunk.ge(B_0) & chunk.le(B_9)
         var mask = pack_bits(is_digit)
         var run = Int(count_trailing_zeros(~UInt64(mask)))
         if run < W:
@@ -180,28 +219,26 @@ def _validate_number(bytes: Span[UInt8, _], start: Int, end: Int) raises:
     Digit runs — the dominant bytes of number-heavy documents — advance via
     the SIMD hop above instead of per-byte compares."""
     var i = start
-    if i < end and bytes[i] == UInt8(ord("-")):
+    if i < end and bytes[i] == B_MINUS:
         i += 1
     if i >= end:
         _error("number is missing digits", start)
-    if bytes[i] == UInt8(ord("0")):
+    if bytes[i] == B_0:
         i += 1
-    elif bytes[i] >= UInt8(ord("1")) and bytes[i] <= UInt8(ord("9")):
+    elif bytes[i] >= B_1 and bytes[i] <= B_9:
         i = _digit_run_end(bytes, i + 1, end)
     else:
         _error("number has an invalid leading digit", i)
-    if i < end and bytes[i] == UInt8(ord(".")):
+    if i < end and bytes[i] == B_DOT:
         i += 1
-        if i >= end or bytes[i] < UInt8(ord("0")) or bytes[i] > UInt8(ord("9")):
+        if i >= end or bytes[i] < B_0 or bytes[i] > B_9:
             _error("number has a bare decimal point", i)
         i = _digit_run_end(bytes, i + 1, end)
-    if i < end and (bytes[i] == UInt8(ord("e")) or bytes[i] == UInt8(ord("E"))):
+    if i < end and (bytes[i] == B_E_LOWER or bytes[i] == B_E_UPPER):
         i += 1
-        if i < end and (
-            bytes[i] == UInt8(ord("+")) or bytes[i] == UInt8(ord("-"))
-        ):
+        if i < end and (bytes[i] == B_PLUS or bytes[i] == B_MINUS):
             i += 1
-        if i >= end or bytes[i] < UInt8(ord("0")) or bytes[i] > UInt8(ord("9")):
+        if i >= end or bytes[i] < B_0 or bytes[i] > B_9:
             _error("number has an empty exponent", i)
         i = _digit_run_end(bytes, i + 1, end)
     if i != end:
@@ -213,26 +250,26 @@ def _validate_literal(
 ) raises -> UInt64:
     """Exact `true` / `false` / `null` spelling. Returns the tape word0."""
     var length = end - start
-    if length == 4 and bytes[start] == UInt8(ord("t")):
+    if length == 4 and bytes[start] == B_T:
         if (
-            bytes[start + 1] == UInt8(ord("r"))
-            and bytes[start + 2] == UInt8(ord("u"))
-            and bytes[start + 3] == UInt8(ord("e"))
+            bytes[start + 1] == B_R
+            and bytes[start + 2] == B_U
+            and bytes[start + 3] == B_E_LOWER
         ):
             return make_word0(TAG_BOOLEAN, UInt8(0), 1)
-    elif length == 5 and bytes[start] == UInt8(ord("f")):
+    elif length == 5 and bytes[start] == B_F:
         if (
-            bytes[start + 1] == UInt8(ord("a"))
-            and bytes[start + 2] == UInt8(ord("l"))
-            and bytes[start + 3] == UInt8(ord("s"))
-            and bytes[start + 4] == UInt8(ord("e"))
+            bytes[start + 1] == B_A
+            and bytes[start + 2] == B_L
+            and bytes[start + 3] == B_S
+            and bytes[start + 4] == B_E_LOWER
         ):
             return make_word0(TAG_BOOLEAN, UInt8(0), 0)
-    elif length == 4 and bytes[start] == UInt8(ord("n")):
+    elif length == 4 and bytes[start] == B_N:
         if (
-            bytes[start + 1] == UInt8(ord("u"))
-            and bytes[start + 2] == UInt8(ord("l"))
-            and bytes[start + 3] == UInt8(ord("l"))
+            bytes[start + 1] == B_U
+            and bytes[start + 2] == B_L
+            and bytes[start + 3] == B_L
         ):
             return make_word0(TAG_NULL, UInt8(0), 0)
     _error("unrecognized literal", start)
@@ -241,12 +278,12 @@ def _validate_literal(
 
 @always_inline
 def _hex_value(byte: UInt8) -> Int:
-    if byte >= UInt8(ord("0")) and byte <= UInt8(ord("9")):
-        return Int(byte - UInt8(ord("0")))
-    if byte >= UInt8(ord("a")) and byte <= UInt8(ord("f")):
-        return Int(byte - UInt8(ord("a"))) + 10
-    if byte >= UInt8(ord("A")) and byte <= UInt8(ord("F")):
-        return Int(byte - UInt8(ord("A"))) + 10
+    if byte >= B_0 and byte <= B_9:
+        return Int(byte - B_0)
+    if byte >= B_A and byte <= B_F:
+        return Int(byte - B_A) + 10
+    if byte >= B_A_UPPER and byte <= B_F_UPPER:
+        return Int(byte - B_A_UPPER) + 10
     return -1
 
 
@@ -287,12 +324,12 @@ def _validate_string(
         while i + W <= end:
             var chunk = ptr.load[width=W](i)
             if pack_bits[dtype=DType.uint64](
-                (chunk & V(UInt8(0x80))).ne(V(0))
+                (chunk & V(HIGH_BIT)).ne(V(0))
             ) != UInt64(0):
                 saw_high = True
             var special = pack_bits[dtype=DType.uint64](
-                chunk.eq(V(UInt8(0x5C)))
-            ) | pack_bits[dtype=DType.uint64](chunk.lt(V(UInt8(0x20))))
+                chunk.eq(V(B_BSLASH))
+            ) | pack_bits[dtype=DType.uint64](chunk.lt(V(B_SPACE)))
             if special == UInt64(0):
                 i += W
                 continue
@@ -301,13 +338,13 @@ def _validate_string(
         if i >= end:
             break
         var byte = bytes[i]
-        if byte >= UInt8(0x80):
+        if byte >= HIGH_BIT:
             saw_high = True
             i += 1
             continue
-        if byte < UInt8(0x20):
+        if byte < B_SPACE:
             _error("raw control character in string", i)
-        if byte != UInt8(ord("\\")):
+        if byte != B_BSLASH:
             i += 1
             continue
         has_escape = True
@@ -316,28 +353,24 @@ def _validate_string(
             _error("string ends in a bare backslash", i)
         var escape = bytes[i]
         if (
-            escape == UInt8(ord('"'))
-            or escape == UInt8(ord("\\"))
-            or escape == UInt8(ord("/"))
-            or escape == UInt8(ord("b"))
-            or escape == UInt8(ord("f"))
-            or escape == UInt8(ord("n"))
-            or escape == UInt8(ord("r"))
-            or escape == UInt8(ord("t"))
+            escape == B_QUOTE
+            or escape == B_BSLASH
+            or escape == B_SLASH
+            or escape == B_B
+            or escape == B_F
+            or escape == B_N
+            or escape == B_R
+            or escape == B_T
         ):
             i += 1
             continue
-        if escape != UInt8(ord("u")):
+        if escape != B_U:
             _error("invalid escape character", i)
         var code = _read_hex4(bytes, i + 1, end)
         i += 5
         if code >= 0xD800 and code <= 0xDBFF:
             # High surrogate: the low half must follow immediately.
-            if (
-                i + 1 >= end
-                or bytes[i] != UInt8(ord("\\"))
-                or bytes[i + 1] != UInt8(ord("u"))
-            ):
+            if i + 1 >= end or bytes[i] != B_BSLASH or bytes[i + 1] != B_U:
                 _error("unpaired high surrogate escape", i)
             var low = _read_hex4(bytes, i + 2, end)
             if low < 0xDC00 or low > 0xDFFF:
@@ -413,9 +446,7 @@ def _build_tape_inner[
                 _error("unexpected characters after value", cursor)
             _begin_value(stack, root_seen, atom_start)
             var first = bytes[atom_start]
-            if first == UInt8(ord("-")) or (
-                first >= UInt8(ord("0")) and first <= UInt8(ord("9"))
-            ):
+            if first == B_MINUS or (first >= B_0 and first <= B_9):
                 _validate_number(bytes, atom_start, atom_end)
                 tape.append(make_word0(TAG_NUMBER, UInt8(0), atom_start))
                 tape.append(UInt64(atom_end))
@@ -430,7 +461,7 @@ def _build_tape_inner[
         var byte = bytes[at]
         p += 1
 
-        if byte == UInt8(ord('"')):
+        if byte == B_QUOTE:
             # The matching close is the next structural — stage 1 emits both.
             if p >= len(positions) or bytes[Int(positions[p])] != UInt8(
                 ord('"')
@@ -448,6 +479,7 @@ def _build_tape_inner[
                 if state == _EXPECT_KEY_OR_CLOSE or state == _EXPECT_KEY:
                     is_key = True
             if is_key:
+                var key_flags = FLAG_ESCAPED if escaped else UInt8(0)
                 comptime if options.rejects_duplicates():
                     _check_duplicate_key(
                         bytes,
@@ -455,7 +487,7 @@ def _build_tape_inner[
                         stack[len(stack) - 1],
                         at + 1,
                         close,
-                        escaped,
+                        key_flags,
                     )
                 comptime if options.shadows_duplicates():
                     if _shadow_duplicate_key(
@@ -464,7 +496,7 @@ def _build_tape_inner[
                         stack[len(stack) - 1],
                         at + 1,
                         close,
-                        escaped,
+                        key_flags,
                     ):
                         stack[len(stack) - 1].count -= 1
                 stack[len(stack) - 1].state = _EXPECT_COLON
@@ -480,11 +512,11 @@ def _build_tape_inner[
             cursor = close + 1
             continue
 
-        if byte == UInt8(ord("{")) or byte == UInt8(ord("[")):
+        if byte == B_LBRACE or byte == B_LBRACK:
             _begin_value(stack, root_seen, at)
             if len(stack) >= options.max_depth:
                 _error("nesting depth limit exceeded", at)
-            var is_object = byte == UInt8(ord("{"))
+            var is_object = byte == B_LBRACE
             var entry = len(tape) // 2
             tape.append(
                 make_word0(TAG_OBJECT if is_object else TAG_ARRAY, UInt8(0), 0)
@@ -500,11 +532,11 @@ def _build_tape_inner[
             cursor = at + 1
             continue
 
-        if byte == UInt8(ord("}")) or byte == UInt8(ord("]")):
+        if byte == B_RBRACE or byte == B_RBRACK:
             if len(stack) == 0:
                 _error("close with no open container", at)
             var frame = stack[len(stack) - 1]
-            var closing_object = byte == UInt8(ord("}"))
+            var closing_object = byte == B_RBRACE
             if frame.is_object != closing_object:
                 _error("mismatched container close", at)
             if closing_object:
@@ -530,7 +562,7 @@ def _build_tape_inner[
             cursor = at + 1
             continue
 
-        if byte == UInt8(ord(",")):
+        if byte == B_COMMA:
             if len(stack) == 0:
                 _error("',' outside any container", at)
             var state = stack[len(stack) - 1].state
@@ -587,33 +619,42 @@ def _end_value(mut stack: List[_Frame], mut root_seen: Bool):
         stack[len(stack) - 1].state = _EXPECT_ARRAY_NEXT
 
 
+@always_inline
+def _decode_key(
+    bytes: Span[UInt8, _], start: Int, end: Int, flags: UInt8
+) -> String:
+    if (flags & FLAG_REENCODE) != UInt8(0):
+        return decode_json5_string(bytes, start, end)
+    return decode_escaped_string(bytes, start, end)
+
+
 def _keys_equal(
     bytes: Span[UInt8, _],
     a_start: Int,
     a_end: Int,
-    a_escaped: Bool,
+    a_flags: UInt8,
     b_start: Int,
     b_end: Int,
-    b_escaped: Bool,
+    b_flags: UInt8,
 ) -> Bool:
     """Member-name equality by CHARACTER (RFC 7493 §2.3), matching the lookup
     path's `_key_matches`: escaped spellings decode before comparing, so
-    `"\\u0061"` and `"a"` are the same name to every duplicate policy. Both
-    spans were validated when their strings were parsed, which is what makes
-    the trusted decoder sound here."""
-    if not a_escaped and not b_escaped:
+    `"\\u0061"` and `"a"` are the same name to every duplicate policy —
+    JSON5 spellings (FLAG_REENCODE) decode with the JSON5 decoder. Both
+    spans were validated when their strings were parsed."""
+    if a_flags == UInt8(0) and b_flags == UInt8(0):
         if a_end - a_start != b_end - b_start:
             return False
         for k in range(a_end - a_start):
             if bytes[a_start + k] != bytes[b_start + k]:
                 return False
         return True
-    var a = decode_escaped_string(
-        bytes, a_start, a_end
-    ) if a_escaped else String(unsafe_from_utf8=bytes[a_start:a_end])
-    var b = decode_escaped_string(
-        bytes, b_start, b_end
-    ) if b_escaped else String(unsafe_from_utf8=bytes[b_start:b_end])
+    var a = _decode_key(bytes, a_start, a_end, a_flags) if a_flags != UInt8(
+        0
+    ) else String(unsafe_from_utf8=bytes[a_start:a_end])
+    var b = _decode_key(bytes, b_start, b_end, b_flags) if b_flags != UInt8(
+        0
+    ) else String(unsafe_from_utf8=bytes[b_start:b_end])
     return a == b
 
 
@@ -634,7 +675,7 @@ def _check_duplicate_key(
     frame: _Frame,
     start: Int,
     end: Int,
-    escaped: Bool,
+    flags: UInt8,
 ) raises:
     """REJECT policy: compare the new key against every earlier key in this
     object. Priced honestly in ARCHITECTURE.md — only compiled in when the
@@ -649,10 +690,10 @@ def _check_duplicate_key(
             bytes,
             entry_a(word0),
             Int(tape[entry * 2 + 1]),
-            (entry_flags(word0) & FLAG_ESCAPED) != UInt8(0),
+            entry_flags(word0),
             start,
             end,
-            escaped,
+            flags,
         ):
             _error("duplicate object member name", start)
         entry = _next_member(tape, entry)
@@ -665,7 +706,7 @@ def _shadow_duplicate_key(
     frame: _Frame,
     start: Int,
     end: Int,
-    escaped: Bool,
+    flags: UInt8,
 ) -> Bool:
     """LAST_WINS policy: if an earlier live member has this name, mark its key
     entry FLAG_SHADOWED and report True (the caller drops it from the frame's
@@ -683,10 +724,10 @@ def _shadow_duplicate_key(
             bytes,
             entry_a(word0),
             Int(tape[entry * 2 + 1]),
-            (entry_flags(word0) & FLAG_ESCAPED) != UInt8(0),
+            entry_flags(word0),
             start,
             end,
-            escaped,
+            flags,
         ):
             tape[entry * 2] = word0 | (UInt64(FLAG_SHADOWED) << 48)
             return True

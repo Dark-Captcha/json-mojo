@@ -21,6 +21,7 @@ from std.bit import count_trailing_zeros
 from std.memory.unsafe import pack_bits
 
 from json._internal.bytes import (
+    B_BSLASH,
     B_COLON,
     B_COMMA,
     B_LBRACE,
@@ -30,9 +31,20 @@ from json._internal.bytes import (
     B_RBRACE,
     B_RBRACK,
     B_SPACE,
+    B_TAB,
+    CTRL_BS,
+    CTRL_CR,
+    CTRL_FF,
+    CTRL_LF,
+    B_CONTROL_MAX,
 )
-from json._internal.number import write_int_i64, write_uint_u64
+from json._internal.number import (
+    json5_hex_to_uint,
+    write_int_i64,
+    write_uint_u64,
+)
 from json._internal.tape import (
+    FLAG_REENCODE,
     FLAG_SHADOWED,
     TAG_ARRAY,
     TAG_BOOLEAN,
@@ -45,6 +57,7 @@ from json._internal.tape import (
     entry_tag,
     skip_past,
 )
+from json._internal.unicode import decode_json5_string
 from json._internal.writer import ChunkWriter
 from json.document import Document
 from json.options import SerializeOptions
@@ -52,6 +65,7 @@ from json.value import Value
 
 
 comptime _INDENT_WIDTH: Int = 2
+comptime _NIBBLE: UInt8 = UInt8(0x0F)
 comptime _HEX = String("0123456789abcdef")
 
 
@@ -149,9 +163,19 @@ def _write_tape[
             comptime if options.pretty:
                 _write_newline_indent(writer, len(stack) + 1)
             if top_is_object:
-                writer.byte(B_QUOTE)
-                writer.span(bytes[entry_a(word0) : Int(tape[entry * 2 + 1])])
-                writer.byte(B_QUOTE)
+                if (entry_flags(word0) & FLAG_REENCODE) != UInt8(0):
+                    _reencode_string(
+                        writer,
+                        bytes,
+                        entry_a(word0),
+                        Int(tape[entry * 2 + 1]),
+                    )
+                else:
+                    writer.byte(B_QUOTE)
+                    writer.span(
+                        bytes[entry_a(word0) : Int(tape[entry * 2 + 1])]
+                    )
+                    writer.byte(B_QUOTE)
                 writer.byte(B_COLON)
                 comptime if options.pretty:
                     writer.byte(B_SPACE)
@@ -180,13 +204,24 @@ def _write_tape[
                 top_is_object = is_object
             entry += 1
         elif tag == TAG_STRING:
-            # Raw span re-emission: the body is original text, escapes intact.
-            writer.byte(B_QUOTE)
-            writer.span(bytes[entry_a(word0) : Int(tape[entry * 2 + 1])])
-            writer.byte(B_QUOTE)
+            if (entry_flags(word0) & FLAG_REENCODE) != UInt8(0):
+                # JSON5 spelling: decode, then emit standard JSON.
+                _reencode_string(
+                    writer, bytes, entry_a(word0), Int(tape[entry * 2 + 1])
+                )
+            else:
+                # Raw span re-emission: original text, escapes intact.
+                writer.byte(B_QUOTE)
+                writer.span(bytes[entry_a(word0) : Int(tape[entry * 2 + 1])])
+                writer.byte(B_QUOTE)
             entry += 1
         elif tag == TAG_NUMBER:
-            writer.span(bytes[entry_a(word0) : Int(tape[entry * 2 + 1])])
+            if (entry_flags(word0) & FLAG_REENCODE) != UInt8(0):
+                _reencode_number(
+                    writer, bytes, entry_a(word0), Int(tape[entry * 2 + 1])
+                )
+            else:
+                writer.span(bytes[entry_a(word0) : Int(tape[entry * 2 + 1])])
             entry += 1
         elif tag == TAG_BOOLEAN:
             if entry_a(word0) == 1:
@@ -204,6 +239,78 @@ def _write_newline_indent(mut writer: ChunkWriter, depth: Int):
     writer.byte(B_LF)
     for _ in range(_INDENT_WIDTH * depth):
         writer.byte(B_SPACE)
+
+
+def _reencode_string(
+    mut writer: ChunkWriter, bytes: Span[UInt8, _], start: Int, end: Int
+) raises:
+    """A JSON5 string spelling (FLAG_REENCODE) emits as standard JSON:
+    decode with the JSON5 decoder, escape with the serializer's scanner."""
+    var decoded = decode_json5_string(bytes, start, end)
+    writer.byte(B_QUOTE)
+    _escape_into(writer, decoded.as_bytes())
+    writer.byte(B_QUOTE)
+
+
+def _reencode_number(
+    mut writer: ChunkWriter, bytes: Span[UInt8, _], start: Int, end: Int
+) raises:
+    """A JSON5 number spelling emits as standard JSON, value-exactly where
+    text transforms suffice: `+` strips, bare dots gain their zero, hex
+    re-bases through UInt64 (Float64 beyond 64 bits — ES numbers are
+    doubles). Infinity/NaN refuse, per the serializer's RFC 8259 contract."""
+    var i = start
+    var negative = False
+    if bytes[i] == UInt8(0x2D):  # -
+        negative = True
+        i += 1
+    elif bytes[i] == UInt8(0x2B):  # + strips
+        i += 1
+    if bytes[i] == UInt8(0x49) or bytes[i] == UInt8(0x4E):  # Infinity / NaN
+        raise Error(
+            "json.serialize: JSON5 Infinity/NaN are not representable in"
+            " RFC 8259 output"
+        )
+    if (
+        i + 1 < end
+        and bytes[i] == UInt8(0x30)
+        and (bytes[i + 1] == UInt8(0x78) or bytes[i + 1] == UInt8(0x58))
+    ):
+        var exact = json5_hex_to_uint(bytes, i, end)
+        if exact:
+            if negative:
+                writer.byte(UInt8(0x2D))
+            write_uint_u64(writer, exact.value())
+            return
+        var value = Float64(0.0)
+        var k = i + 2
+        while k < end:
+            var c = bytes[k]
+            var d: Int
+            if c >= UInt8(0x30) and c <= UInt8(0x39):
+                d = Int(c - UInt8(0x30))
+            elif c >= UInt8(0x61) and c <= UInt8(0x66):
+                d = Int(c - UInt8(0x61)) + 10
+            else:
+                d = Int(c - UInt8(0x41)) + 10
+            value = value * 16.0 + Float64(d)
+            k += 1
+        if negative:
+            value = -value
+        value.write_to(writer)
+        return
+    if negative:
+        writer.byte(UInt8(0x2D))
+    if bytes[i] == UInt8(0x2E):  # .5 -> 0.5
+        writer.byte(UInt8(0x30))
+    var k2 = i
+    var last_dot = False
+    while k2 < end:
+        writer.byte(bytes[k2])
+        last_dot = bytes[k2] == UInt8(0x2E)
+        k2 += 1
+    if last_dot:  # 5. -> 5.0
+        writer.byte(UInt8(0x30))
 
 
 # --- Serializer: the sink ToJson implementations write into -----------------------
@@ -296,8 +403,8 @@ def _escape_into(mut writer: ChunkWriter, bytes: Span[UInt8, _]):
     var start = 0
     comptime W = 64
     var v_quote = SIMD[DType.uint8, W](B_QUOTE)
-    var v_backslash = SIMD[DType.uint8, W](UInt8(0x5C))
-    var v_control = SIMD[DType.uint8, W](UInt8(0x20))
+    var v_backslash = SIMD[DType.uint8, W](B_BSLASH)
+    var v_control = SIMD[DType.uint8, W](B_CONTROL_MAX)
     while i + W <= n:
         var chunk = ptr.load[width=W](i)
         var mask = pack_bits[dtype=DType.uint64](
@@ -317,7 +424,7 @@ def _escape_into(mut writer: ChunkWriter, bytes: Span[UInt8, _]):
         i += W
     while i < n:
         var c = ptr[i]
-        if c == B_QUOTE or c == UInt8(0x5C) or c < UInt8(0x20):
+        if c == B_QUOTE or c == B_BSLASH or c < B_CONTROL_MAX:
             if i > start:
                 writer.span(Span(ptr=ptr + start, length=i - start))
             _emit_escape(writer, c)
@@ -331,21 +438,21 @@ def _escape_into(mut writer: ChunkWriter, bytes: Span[UInt8, _]):
 def _emit_escape(mut writer: ChunkWriter, c: UInt8):
     if c == B_QUOTE:
         writer.lit('\\"')
-    elif c == UInt8(0x5C):
+    elif c == B_BSLASH:
         writer.lit("\\\\")
-    elif c == UInt8(0x08):
+    elif c == CTRL_BS:
         writer.lit("\\b")
-    elif c == UInt8(0x09):
+    elif c == B_TAB:
         writer.lit("\\t")
-    elif c == UInt8(0x0A):
+    elif c == CTRL_LF:
         writer.lit("\\n")
-    elif c == UInt8(0x0C):
+    elif c == CTRL_FF:
         writer.lit("\\f")
-    elif c == UInt8(0x0D):
+    elif c == CTRL_CR:
         writer.lit("\\r")
     else:
         # Any other control byte < 0x20 → \u00XX.
         writer.lit("\\u00")
         var hex_bytes = _HEX.as_bytes()
-        writer.byte(hex_bytes[Int((c >> UInt8(4)) & UInt8(0x0F))])
-        writer.byte(hex_bytes[Int(c & UInt8(0x0F))])
+        writer.byte(hex_bytes[Int((c >> UInt8(4)) & _NIBBLE)])
+        writer.byte(hex_bytes[Int(c & _NIBBLE)])

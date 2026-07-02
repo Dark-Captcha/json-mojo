@@ -25,6 +25,17 @@ comptime B_CR: UInt8 = UInt8(0x0D)
 comptime B_T: UInt8 = UInt8(0x74)  # t
 comptime B_F: UInt8 = UInt8(0x66)  # f
 comptime B_N: UInt8 = UInt8(0x6E)  # n
+comptime B_L: UInt8 = UInt8(0x6C)  # l
+comptime B_S: UInt8 = UInt8(0x73)  # s
+comptime B_E: UInt8 = UInt8(0x65)  # e (alias of B_E_LOWER)
+
+# JSON Pointer (RFC 6901 §3 — `~0` is `~`, `~1` is `/`)
+comptime B_TILDE: UInt8 = UInt8(0x7E)  # ~
+
+# Byte-order mark (RFC 8259 §8.1 — skipped in standard mode, I-JSON error)
+comptime B_BOM_0: UInt8 = UInt8(0xEF)
+comptime B_BOM_1: UInt8 = UInt8(0xBB)
+comptime B_BOM_2: UInt8 = UInt8(0xBF)
 
 # Numbers (RFC 8259 §6)
 comptime B_0: UInt8 = UInt8(0x30)  # 0

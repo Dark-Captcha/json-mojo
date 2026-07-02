@@ -13,10 +13,12 @@
 
 from std.builtin.rebind import rebind
 
+from json._internal.bytes import B_BOM_0, B_BOM_1, B_BOM_2
 from json._internal.simd import BLOCK_WIDTH
 from json._internal.stage_one import build_structural_index
+from json._internal.json5 import build_tape_json5
 from json._internal.tape import build_tape
-from json.options import ParseMode, ParseOptions
+from json.options import Dialect, ParseMode, ParseOptions
 from json.value import (
     Value,
     ValueKind,
@@ -35,6 +37,22 @@ struct Document(Movable):
     def __init__(out self, *, var input: String, var tape: List[UInt64]):
         self._input = input^
         self._tape = tape^
+
+    def __init__(
+        out self, *, var unsafe_buffer: String, var unsafe_tape: List[UInt64]
+    ):
+        """Extension tier 2's entry: wrap a decoder-built buffer + tape as a
+        Document — every consumer (cursor, serde, `dumps`) is inherited
+        unchanged. UNSAFE: the caller vouches that the tape is a well-formed
+        six-kind tape (ARCHITECTURE.md, Layer 1), every span is in-bounds,
+        string spans are UTF-8-validated *escaped-JSON* content, and number
+        spans are RFC 8259 number grammar. Decoder-rendered text (numbers,
+        re-escaped strings) lives PAST the original input in the same buffer
+        — the appended-tail pattern; `FLAG_ARENA` stays reserved for true
+        side-arenas. Tail padding is (re)established here."""
+        unsafe_buffer.reserve(unsafe_buffer.byte_length() + BLOCK_WIDTH)
+        self._input = unsafe_buffer^
+        self._tape = unsafe_tape^
 
     # --- The root's access surface, forwarded ----------------------------------
 
@@ -86,11 +104,7 @@ def parse[
     var length = text.byte_length()
     if length >= 3:
         var head = text.as_bytes()
-        if (
-            head[0] == UInt8(0xEF)
-            and head[1] == UInt8(0xBB)
-            and head[2] == UInt8(0xBF)
-        ):
+        if head[0] == B_BOM_0 and head[1] == B_BOM_1 and head[2] == B_BOM_2:
             comptime if options.mode == ParseMode.I_JSON:
                 raise Error(
                     "json.parse: byte-order mark rejected in I-JSON mode"
@@ -102,9 +116,17 @@ def parse[
     # The stage-1 padding contract (probed: capacity grows, content intact).
     text.reserve(length + BLOCK_WIDTH)
 
-    var index = build_structural_index(text)
-    var tape = build_tape[options](text, index, start)
-    return Document(input=text^, tape=tape^)
+    comptime if options.dialect == Dialect.JSON5:
+        comptime assert options.mode == ParseMode.STANDARD, (
+            "json.parse: I-JSON is an RFC 8259 profile — it cannot govern"
+            " JSON5 text"
+        )
+        var tape5 = build_tape_json5[options](text, start)
+        return Document(input=text^, tape=tape5^)
+    else:
+        var index = build_structural_index(text)
+        var tape = build_tape[options](text, index, start)
+        return Document(input=text^, tape=tape^)
 
 
 def loads(var text: String) raises -> Document:

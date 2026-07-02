@@ -14,9 +14,18 @@
 from std.builtin.rebind import downcast
 from std.reflection import reflect
 
-from json._internal.number import parse_float, parse_int64, parse_uint64
+from json._internal.bytes import B_0, B_1, B_9, B_SLASH, B_TILDE
+from json._internal.number import (
+    json5_number_to_float,
+    json5_number_to_int64,
+    json5_number_to_uint64,
+    parse_float,
+    parse_int64,
+    parse_uint64,
+)
 from json._internal.tape import (
     FLAG_ESCAPED,
+    FLAG_REENCODE,
     FLAG_SHADOWED,
     TAG_ARRAY,
     TAG_BOOLEAN,
@@ -29,7 +38,7 @@ from json._internal.tape import (
     entry_tag,
     skip_past,
 )
-from json._internal.unicode import decode_escaped_string
+from json._internal.unicode import decode_escaped_string, decode_json5_string
 
 
 struct ValueKind(Comparable, Copyable, Movable, TrivialRegisterPassable):
@@ -107,9 +116,21 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
 
     # --- Number introspection (ARCHITECTURE.md: the honest surface) -----------
 
+    @always_inline
+    def _number_is_json5(self) -> Bool:
+        return (
+            entry_flags(self._tape[self._entry * 2]) & FLAG_REENCODE
+        ) != UInt8(0)
+
     def fits_int64(self) -> Bool:
         if entry_tag(self._tape[self._entry * 2]) != TAG_NUMBER:
             return False
+        if self._number_is_json5():
+            return Bool(
+                json5_number_to_int64(
+                    self._bytes, self._number_start(), self._number_end()
+                )
+            )
         return Bool(
             parse_int64(self._bytes, self._number_start(), self._number_end())
         )
@@ -117,13 +138,31 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
     def fits_uint64(self) -> Bool:
         if entry_tag(self._tape[self._entry * 2]) != TAG_NUMBER:
             return False
+        if self._number_is_json5():
+            return Bool(
+                json5_number_to_uint64(
+                    self._bytes, self._number_start(), self._number_end()
+                )
+            )
         return Bool(
             parse_uint64(self._bytes, self._number_start(), self._number_end())
         )
 
     def fits_float64(self) -> Bool:
+        """Converts to a FINITE Float64 — JSON5's Infinity/NaN answer False
+        here (they convert via `to[Float64]()` regardless)."""
         if entry_tag(self._tape[self._entry * 2]) != TAG_NUMBER:
             return False
+        if self._number_is_json5():
+            var value = json5_number_to_float(
+                self._bytes, self._number_start(), self._number_end()
+            )
+            if not value:
+                return False
+            var f = value.value()
+            return (
+                f == f and f <= Float64.MAX_FINITE and f >= -Float64.MAX_FINITE
+            )
         return Bool(
             parse_float(self._bytes, self._number_start(), self._number_end())
         )
@@ -213,7 +252,7 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
             return Value[Self.origin](
                 bytes=self._bytes, tape=self._tape, entry=self._entry
             )
-        if pointer_bytes[0] != UInt8(ord("/")):
+        if pointer_bytes[0] != B_SLASH:
             raise Error(
                 "json.value: JSON Pointer must be empty or start with '/'"
             )
@@ -224,17 +263,17 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
         while i <= n:
             # Decode one reference token (up to the next '/' or the end).
             var token = String("")
-            while i < n and pointer_bytes[i] != UInt8(ord("/")):
+            while i < n and pointer_bytes[i] != B_SLASH:
                 var c = pointer_bytes[i]
-                if c == UInt8(ord("~")):
+                if c == B_TILDE:
                     if i + 1 >= n:
                         raise Error(
                             "json.value: JSON Pointer ends in a bare '~'"
                         )
                     var next = pointer_bytes[i + 1]
-                    if next == UInt8(ord("0")):
+                    if next == B_0:
                         token += "~"
-                    elif next == UInt8(ord("1")):
+                    elif next == B_1:
                         token += "/"
                     else:
                         raise Error(
@@ -288,9 +327,15 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
     def _read_int64(self) raises -> Int64:
         if entry_tag(self._tape[self._entry * 2]) != TAG_NUMBER:
             raise Error("json.value: expected a number")
-        var parsed = parse_int64(
-            self._bytes, self._number_start(), self._number_end()
-        )
+        var parsed: Optional[Int64]
+        if self._number_is_json5():
+            parsed = json5_number_to_int64(
+                self._bytes, self._number_start(), self._number_end()
+            )
+        else:
+            parsed = parse_int64(
+                self._bytes, self._number_start(), self._number_end()
+            )
         if not parsed:
             raise Error("json.value: number is not representable as Int64")
         return parsed.value()
@@ -298,9 +343,15 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
     def _read_uint64(self) raises -> UInt64:
         if entry_tag(self._tape[self._entry * 2]) != TAG_NUMBER:
             raise Error("json.value: expected a number")
-        var parsed = parse_uint64(
-            self._bytes, self._number_start(), self._number_end()
-        )
+        var parsed: Optional[UInt64]
+        if self._number_is_json5():
+            parsed = json5_number_to_uint64(
+                self._bytes, self._number_start(), self._number_end()
+            )
+        else:
+            parsed = parse_uint64(
+                self._bytes, self._number_start(), self._number_end()
+            )
         if not parsed:
             raise Error("json.value: number is not representable as UInt64")
         return parsed.value()
@@ -308,9 +359,15 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
     def _read_float64(self) raises -> Float64:
         if entry_tag(self._tape[self._entry * 2]) != TAG_NUMBER:
             raise Error("json.value: expected a number")
-        var parsed = parse_float(
-            self._bytes, self._number_start(), self._number_end()
-        )
+        var parsed: Optional[Float64]
+        if self._number_is_json5():
+            parsed = json5_number_to_float(
+                self._bytes, self._number_start(), self._number_end()
+            )
+        else:
+            parsed = parse_float(
+                self._bytes, self._number_start(), self._number_end()
+            )
         if not parsed:
             raise Error("json.value: number overflows Float64")
         return parsed.value()
@@ -321,6 +378,8 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
             raise Error("json.value: expected a string")
         var start = entry_a(word0)
         var end = Int(self._tape[self._entry * 2 + 1])
+        if (entry_flags(word0) & FLAG_REENCODE) != UInt8(0):
+            return decode_json5_string(self._bytes, start, end)
         if (entry_flags(word0) & FLAG_ESCAPED) != UInt8(0):
             return decode_escaped_string(self._bytes, start, end)
         return String(unsafe_from_utf8=self._bytes[start:end])
@@ -345,6 +404,8 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
         var start = entry_a(word0)
         var end = Int(self._tape[key_entry * 2 + 1])
         var key_bytes = key.as_bytes()
+        if (entry_flags(word0) & FLAG_REENCODE) != UInt8(0):
+            return decode_json5_string(self._bytes, start, end) == key
         if (entry_flags(word0) & FLAG_ESCAPED) != UInt8(0):
             # Escaped names compare by decoded value, not raw spelling.
             var decoded = decode_escaped_string(self._bytes, start, end)
@@ -372,16 +433,16 @@ def _pointer_index(token: String) raises -> Int:
     var n = len(token_bytes)
     if n == 0:
         raise Error("json.value: empty JSON Pointer array index")
-    if n > 1 and token_bytes[0] == UInt8(ord("0")):
+    if n > 1 and token_bytes[0] == B_0:
         raise Error("json.value: JSON Pointer index has a leading zero")
     var index = 0
     for k in range(n):
         var c = token_bytes[k]
-        if c < UInt8(ord("0")) or c > UInt8(ord("9")):
+        if c < B_0 or c > B_9:
             raise Error(
                 "json.value: JSON Pointer index is not a number: " + token
             )
-        index = index * 10 + Int(c - UInt8(ord("0")))
+        index = index * 10 + Int(c - B_0)
         if index > (1 << 47):
             raise Error("json.value: JSON Pointer index out of range")
     return index
@@ -450,6 +511,8 @@ struct Member[origin: ImmutOrigin](Copyable, Movable):
         var word0 = self._tape[self._key_entry * 2]
         var start = entry_a(word0)
         var end = Int(self._tape[self._key_entry * 2 + 1])
+        if (entry_flags(word0) & FLAG_REENCODE) != UInt8(0):
+            return decode_json5_string(self._bytes, start, end)
         if (entry_flags(word0) & FLAG_ESCAPED) != UInt8(0):
             return decode_escaped_string(self._bytes, start, end)
         return String(unsafe_from_utf8=self._bytes[start:end])

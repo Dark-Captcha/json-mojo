@@ -24,8 +24,10 @@ from json._internal.writer import ChunkWriter
 # __init__ re-export test.
 from json import deserialize, serialize, try_deserialize, FromJson, ToJson
 from json import dump, dumps_lines, dumps_seq, load, loads_lines, loads_seq
+from json import apply_patch, merge_patch
 from json.document import loads, parse, try_parse
 from json.options import (
+    Dialect,
     DuplicatePolicy,
     ParseMode,
     ParseOptions,
@@ -731,6 +733,220 @@ def test_serde_containers() raises:
     _assert(not Bool(bad), "try_deserialize returns None on parse failure")
 
 
+def test_dialect_json5() raises:
+    comptime J5 = ParseOptions(dialect=Dialect.JSON5)
+
+    # The whole feature matrix in one document.
+    var doc = parse[J5](
+        String(
+            "{ unquoted: 1, 'single': 'it\\'s', hex: 0xFF, tiny: .5,"
+            " big: 5., plus: +3, trail: [1, 2,], /* block */ // line\n"
+            " $id_: 'ok', \\u0061scii: 2, }"
+        )
+    )
+    _assert(doc.__len__() == 9, "nine members parse")
+    _assert(doc["unquoted"].to[Int64]() == 1, "unquoted key reads")
+    _assert(doc["single"].to[String]() == "it's", "single-quoted decodes")
+    _assert(doc["hex"].to[Int64]() == 255, "hex reads as Int64")
+    _assert(doc["hex"].to[Float64]() == 255.0, "hex reads as Float64")
+    _assert(doc["tiny"].to[Float64]() == 0.5, "leading-dot decimal")
+    _assert(doc["big"].to[Float64]() == 5.0, "trailing-dot decimal")
+    _assert(doc["plus"].to[Int64]() == 3, "leading + strips")
+    _assert(doc["trail"].__len__() == 2, "trailing comma tolerated")
+    _assert(doc["$id_"].to[String]() == "ok", "$ and _ identifiers")
+    _assert(doc["ascii"].to[Int64]() == 2, "\\u escape in identifier")
+
+    # dumps normalizes JSON5 spellings to RFC 8259 output.
+    var out = dumps(doc)
+    var expected = String('{"unquoted":1,"single":"it')
+    expected += "'"
+    expected += 's","hex":255,"tiny":0.5,"big":5.0,'
+    expected += '"plus":3,"trail":[1,2],"$id_":"ok","\\u0061scii":2}'
+    _assert(
+        out == expected,
+        "dumps normalizes to standard JSON, got: " + out,
+    )
+    var reparsed = loads(out.copy())  # the normalized text IS valid JSON
+    _assert(reparsed.__len__() == 9, "normalized output re-parses as JSON")
+
+    # Infinity/NaN: parse and read, refuse to serialize, fits_ is honest.
+    var inf = parse[J5](String("[Infinity, -Infinity, NaN]"))
+    _assert(inf[0].to[Float64]() > Float64.MAX_FINITE, "Infinity reads")
+    _assert(inf[1].to[Float64]() < -Float64.MAX_FINITE, "-Infinity reads")
+    var nan = inf[2].to[Float64]()
+    _assert(nan != nan, "NaN reads")
+    _assert(not inf[0].fits_float64(), "Infinity is not a finite float")
+    var refused = False
+    try:
+        _ = dumps(inf)
+    except error:
+        refused = True
+    _assert(refused, "dumps refuses non-finite JSON5 numbers")
+
+    # Duplicate policies see through JSON5 spellings.
+    var lw = parse[
+        ParseOptions(
+            dialect=Dialect.JSON5, duplicates=DuplicatePolicy.LAST_WINS
+        )
+    ](String("{ key: 1, 'key': 2, \\u006Bey: 3 }"))
+    _assert(lw["key"].to[Int64]() == 3, "LAST_WINS across JSON5 spellings")
+    var rejected = False
+    try:
+        _ = parse[
+            ParseOptions(
+                dialect=Dialect.JSON5, duplicates=DuplicatePolicy.REJECT
+            )
+        ](String("{ a: 1, 'a': 2 }"))
+    except error:
+        rejected = True
+    _assert(rejected, "REJECT sees through JSON5 spellings")
+
+    # Rejections stay rejections.
+    var bad = 0
+    for case_index in range(6):
+        var text: String
+        if case_index == 0:
+            text = String("{ 01: 1 }")  # leading zero
+        elif case_index == 1:
+            text = String("[1, 2")  # unterminated
+        elif case_index == 2:
+            text = String("/* open")  # unterminated comment
+        elif case_index == 3:
+            text = String("'raw\nnewline'")  # raw LF in string
+        elif case_index == 4:
+            text = String("{ \\u0031bad: 1 }")  # digit can't START an id
+        else:
+            text = String("[.e5]")  # dot with no digits
+        try:
+            _ = parse[J5](text.copy())
+            print("JSON5 accept that must reject:", text)
+        except error:
+            bad += 1
+    _assert(bad == 6, "JSON5 rejections hold")
+
+    # Line continuations and multi-byte whitespace.
+    var cont = parse[J5](String("'a\\\nb'"))
+    _assert(cont.to[String]() == "ab", "line continuation vanishes")
+    var nbsp_text = List[UInt8]()
+    nbsp_text.append(UInt8(0x5B))  # [
+    nbsp_text.append(UInt8(0xC2))  # NBSP
+    nbsp_text.append(UInt8(0xA0))
+    nbsp_text.append(UInt8(0x31))  # 1
+    nbsp_text.append(UInt8(0xC2))  # NBSP
+    nbsp_text.append(UInt8(0xA0))
+    nbsp_text.append(UInt8(0x5D))  # ]
+    var nbsp = parse[J5](String(unsafe_from_utf8=nbsp_text))
+    _assert(nbsp[0].to[Int64]() == 1, "NBSP is JSON5 whitespace")
+
+
+def test_json_patch_rfc6902() raises:
+    # RFC 6902 Appendix A shapes, spec-exact semantics.
+    var doc = loads('{"foo":{"bar":1},"list":[1,2,3]}')
+
+    var added = apply_patch(
+        doc, loads('[{"op":"add","path":"/foo/baz","value":true}]')
+    )
+    _assert(added["foo"]["baz"].to[Bool](), "add creates a member")
+
+    var replaced = apply_patch(
+        doc, loads('[{"op":"replace","path":"/foo/bar","value":9}]')
+    )
+    _assert(replaced["foo"]["bar"].to[Int64]() == 9, "replace swaps a value")
+
+    var removed = apply_patch(doc, loads('[{"op":"remove","path":"/list/1"}]'))
+    _assert(
+        dumps(removed) == '{"foo":{"bar":1},"list":[1,3]}',
+        "remove drops an element",
+    )
+
+    var inserted = apply_patch(
+        doc, loads('[{"op":"add","path":"/list/0","value":0}]')
+    )
+    _assert(
+        dumps(inserted) == '{"foo":{"bar":1},"list":[0,1,2,3]}',
+        "array add inserts before the index",
+    )
+    var appended = apply_patch(
+        doc, loads('[{"op":"add","path":"/list/-","value":4}]')
+    )
+    _assert(
+        dumps(appended) == '{"foo":{"bar":1},"list":[1,2,3,4]}',
+        "'-' appends",
+    )
+
+    var moved = apply_patch(
+        doc, loads('[{"op":"move","from":"/foo/bar","path":"/list/-"}]')
+    )
+    _assert(
+        dumps(moved) == '{"foo":{},"list":[1,2,3,1]}', "move lifts and adds"
+    )
+
+    var copied = apply_patch(
+        doc, loads('[{"op":"copy","from":"/list","path":"/foo/twin"}]')
+    )
+    _assert(
+        copied["foo"]["twin"][2].to[Int64]() == 3, "copy duplicates a subtree"
+    )
+
+    # test op: decoded-string and numeric equality; failure carries the index.
+    var ok = apply_patch(
+        doc,
+        loads(
+            '[{"op":"test","path":"/foo/bar","value":1.0},'
+            '{"op":"add","path":"/passed","value":"\\u0079es"}]'
+        ),
+    )
+    _assert(ok["passed"].to[String]() == "yes", "test 1 == 1.0 passes")
+    var failed = False
+    try:
+        _ = apply_patch(
+            doc, loads('[{"op":"test","path":"/foo/bar","value":2}]')
+        )
+    except error:
+        failed = "operation 0" in String(error)
+    _assert(failed, "failed test names its operation")
+
+    # Sequential semantics: op 2 sees op 1's result.
+    var seq2 = apply_patch(
+        doc,
+        loads(
+            '[{"op":"add","path":"/a","value":[]},'
+            '{"op":"add","path":"/a/-","value":7}]'
+        ),
+    )
+    _assert(dumps(seq2["a"]) == "[7]", "operations apply sequentially")
+
+    # Whole-document replacement via the empty pointer.
+    var whole = apply_patch(
+        doc, loads('[{"op":"replace","path":"","value":{"fresh":true}}]')
+    )
+    _assert(dumps(whole) == '{"fresh":true}', "empty pointer replaces the doc")
+
+
+def test_json_merge_patch_rfc7396() raises:
+    # RFC 7396 §3 example shapes.
+    var doc = loads('{"a":"b","c":{"d":"e","f":"g"}}')
+    var merged = merge_patch(doc, loads('{"a":"z","c":{"f":null}}'))
+    _assert(
+        dumps(merged) == '{"a":"z","c":{"d":"e"}}',
+        "merge replaces members and null removes, got: " + dumps(merged),
+    )
+
+    # Non-object patch replaces the target wholesale.
+    var replaced = merge_patch(doc, loads('["array"]'))
+    _assert(dumps(replaced) == '["array"]', "non-object patch replaces")
+
+    # Object patch onto a non-object target: target becomes {} first, and
+    # nulls inside the patch vanish rather than adding members.
+    var grafted = merge_patch(
+        loads('"scalar"'), loads('{"keep":1,"drop":null,"deep":{"x":null}}')
+    )
+    _assert(
+        dumps(grafted) == '{"keep":1,"deep":{}}',
+        "nulls vanish when grafting, got: " + dumps(grafted),
+    )
+
+
 def test_json_lines_and_sequences() raises:
     # NDJSON: LF and CRLF delimiters, blank lines skipped.
     var docs = loads_lines(String('{"a":1}\r\n\n[1,2]\n"x"'))
@@ -1072,6 +1288,27 @@ def main() raises:
         print("  PASS test_serde_rejects_non_object_values")
     except error:
         print("  FAIL test_serde_rejects_non_object_values:", String(error))
+        failures += 1
+
+    try:
+        test_dialect_json5()
+        print("  PASS test_dialect_json5")
+    except error:
+        print("  FAIL test_dialect_json5:", String(error))
+        failures += 1
+
+    try:
+        test_json_patch_rfc6902()
+        print("  PASS test_json_patch_rfc6902")
+    except error:
+        print("  FAIL test_json_patch_rfc6902:", String(error))
+        failures += 1
+
+    try:
+        test_json_merge_patch_rfc7396()
+        print("  PASS test_json_merge_patch_rfc7396")
+    except error:
+        print("  FAIL test_json_merge_patch_rfc7396:", String(error))
         failures += 1
 
     try:
