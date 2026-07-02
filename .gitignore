@@ -1,0 +1,9 @@
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+
+# third-party reference clones (not part of the release)
+references/json/
+references/EmberJson/
+references/JSONTestSuite/
+.build/

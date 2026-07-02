@@ -1,0 +1,23 @@
+[workspace]
+authors = ["Huỳnh Bảo Biên <baobien.dev@gmail.com>"]
+channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
+name = "json-mojo"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+test = "mojo run -I . tests/run_tests.mojo"
+benchmark = "mojo run -I . benchmarks/run_benchmarks.mojo"
+example = "mojo run -I . examples/basic_usage.mojo"
+
+[dependencies]
+mojo-compiler = ">=1.0.0b3.dev2026070206,<2"
+
+[feature.dev.dependencies]
+mblack = "*"
+
+[feature.dev.tasks]
+format = "mblack json tests benchmarks examples"
+
+[environments]
+dev = { features = ["dev"], solve-group = "default" }

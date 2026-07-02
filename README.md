@@ -1,0 +1,151 @@
+# json-mojo
+
+> **Version:** 0.1.0 | **Updated:** 2026-07-02
+
+Spec-exact, SIMD-accelerated JSON for Mojo — a lazy tape engine with Python-easy verbs, zero dependencies, and a measured performance record.
+
+```mojo
+from json import loads, deserialize, serialize, dumps
+
+var data = loads('{"name": "Alice", "scores": [95, 87, 92]}')
+print(data["name"].to[String]())        # Alice
+print(data["scores"][0].to[Int]())      # 95
+
+for score in data["scores"].elements():
+    print(score.to[Int64]())
+
+print(data.at("/scores/2").to[Int]())   # RFC 6901 JSON Pointer
+
+struct Server(Copyable, Defaultable, Movable):  # no trait needed —
+    var host: String                            # serde derives both
+    var port: Int64                             # directions by reflection
+    def __init__(out self):
+        self.host = ""
+        self.port = 0
+
+var server = deserialize[Server]('{"host":"api.example.com","port":8443}')
+print(serialize(server))                # {"host":"api.example.com","port":8443}
+print(dumps(data))                      # byte-faithful re-emission
+```
+
+---
+
+| #   | Section                                     |
+| --- | ------------------------------------------- |
+| 1   | [Why](#why)                                 |
+| 2   | [Install](#install)                         |
+| 3   | [Surface](#surface)                         |
+| 4   | [Verification Record](#verification-record) |
+| 5   | [Performance](#performance)                 |
+| 6   | [Limits](#limits)                           |
+| 7   | [Documents](#documents)                     |
+| 8   | [License](#license)                         |
+
+---
+
+## Why
+
+JSON is how software talks — every API response, every config file, every AI-agent tool call. The fastest parsers live in C++ with dependency chains and a memory model where one mistake is a vulnerability; the easy libraries live in slow interpreters. json-mojo is the marriage: simdjson-class techniques (SIMD structural indexing, a lazy six-kind tape, Eisel-Lemire numbers) in pure Mojo, behind verbs a Python user already knows. See ARCHITECTURE.md for the full purpose and contracts.
+
+---
+
+## Install
+
+Not yet on a package channel — v0.1.0 is consumed from source (publishing is a
+roadmap item, ROADMAP.md):
+
+```bash
+git clone <this repository> json-mojo
+cd json-mojo && pixi install && pixi run test   # toolchain pinned by pixi.toml
+```
+
+Then build your program with this repository on the include path:
+
+```bash
+mojo build -I path/to/json-mojo your_program.mojo
+```
+
+Pure Mojo — no C toolchain, no FFI, no transitive native dependencies.
+
+---
+
+## Surface
+
+Eight functions, ten types (ARCHITECTURE.md, Public Surface):
+
+| Name                                                                      | Purpose                                                                                                                               |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `parse[options](var text)` / `loads(var text)` / `loads_bytes(var bytes)` | Text or bytes → `Document`, taken by move (`parse(body^)`) — zero copies                                                              |
+| `try_parse[options]` / `try_deserialize[T]`                               | Non-raising twins returning `Optional`                                                                                                |
+| `dumps[options](doc)`                                                     | Re-emit a document — compact by default, `SerializeOptions(pretty=True)` for two-space indent                                         |
+| `deserialize[T]` / `serialize`                                            | Typed serde; plain structs derive both directions via reflection, no trait required                                                   |
+| `Document`                                                                | Owns the input and the tape; exposes its root's access surface directly                                                               |
+| `Value` / `ValueKind`                                                     | The lazy cursor: `kind()`, `to[T]()`, `["key"]` / `[index]`, `elements()`, `members()`, `at("/pointer")`, `fits_int64/uint64/float64` |
+| `ParseOptions` / `ParseMode` / `DuplicatePolicy` / `SerializeOptions`     | Comptime policy knobs — each combination compiles its own specialized parser                                                          |
+| `FromJson` / `ToJson` / `Serializer`                                      | The conversion protocol, for custom control                                                                                           |
+
+Errors carry the byte offset **and** the RFC 6901 path of the failure:
+
+```text
+json.parse: unrecognized literal at byte 21 in /config/retries
+```
+
+Numbers are lossless raw text on the tape — a 300-digit integer round-trips exactly; `fits_*` tells you what a number can safely become before you convert.
+
+---
+
+## Verification Record
+
+Every release re-earns all of it (commands in PERF.md, Reproducing):
+
+| Gate                                        | Result                                                                        |
+| ------------------------------------------- | ----------------------------------------------------------------------------- |
+| JSONTestSuite (318 cases)                   | 283 must-pass / **0 failures**; implementation-defined: 12 accept / 23 reject |
+| Float differential vs C `strtod`            | **1,500 / 1,500 bit-exact**, including >19-digit rounding-boundary cases      |
+| Structural fuzz                             | 400/400 byte-exact round-trips; 350/350 hostile inputs without a crash        |
+| UTF-8 differential (strict RFC 3629 oracle) | 424 / 424                                                                     |
+| `dumps ∘ loads` idempotence                 | 95/95 corpus files, byte-exact (part of the suite gate's RESULT line)         |
+| Unit battery                                | 34 / 34                                                                       |
+
+---
+
+## Performance
+
+Full record with conditions, protocols, and weaknesses in PERF.md. Headlines (AMD 7950X3D, release build):
+
+| Measure                                | Result                                                               |
+| -------------------------------------- | -------------------------------------------------------------------- |
+| Corpus parse (twitter / citm / canada) | 0.72–1.29 GB/s — **2.0–2.7× EmberJson** measured on the same machine |
+| Corpus dumps                           | 2.3–8.3 GB/s (raw-span re-emission)                                  |
+| Giant-string parse                     | up to 20 GB/s (SIMD skip + lazy per-body UTF-8)                      |
+| 32-worker aggregate                    | ~15 GB/s parse throughput                                            |
+
+---
+
+## Limits
+
+Stated, not hidden:
+
+| Limit                                                   | Detail                                                                                                                                                                                               |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deserialize[List[T]]` / `deserialize[Dict[String, V]]` | Blocked by three probed toolchain walls (`.probe/SYNTAX.md`, findings 21–23); the typed container read path is the cursor walk (`elements()` / `members()`). Container **serialization** works fully |
+| Struct derivation contract                              | Be `Defaultable`, or have only trivially-destructible fields                                                                                                                                         |
+| Streaming / JSON Lines                                  | Deferred — a fast-follow, not a v1 blocker (ARCHITECTURE.md, Non-Goals)                                                                                                                              |
+| Platform                                                | linux-64 developed and measured; portable SIMD by construction                                                                                                                                       |
+
+---
+
+## Documents
+
+| Document             | Holds                                                                      |
+| -------------------- | -------------------------------------------------------------------------- |
+| ARCHITECTURE.md      | Purpose, contracts, type scheme, public surface, system map                |
+| PERF.md              | The measured record: scorecards, stage breakdown, scaling, weaknesses      |
+| references/README.md | The standards map — five vendored RFCs and the constraints drawn from each |
+| .probe/SYNTAX.md     | 35 verified toolchain findings this library is built on                    |
+
+---
+
+## License
+
+Apache-2.0 WITH LLVM-exception.
