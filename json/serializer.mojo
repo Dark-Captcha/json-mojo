@@ -1,3 +1,5 @@
+"""Provides document serialization and a typed JSON writer."""
+
 # serializer — tape → JSON text (RFC 8259 §10) plus `Serializer`, the sink
 # `ToJson` implementations write into (ARCHITECTURE.md, Public Surface).
 #
@@ -76,8 +78,21 @@ def dumps[
     //,
     options: SerializeOptions = SerializeOptions(),
 ](value: Value[origin]) raises -> String:
-    """Render the value under `value` as JSON text. Compact by default;
-    `SerializeOptions(pretty=True)` indents with two spaces."""
+    """Serializes a lazy JSON value.
+
+    Parameters:
+        origin: The value's borrowed storage origin.
+        options: The serialization policy.
+
+    Args:
+        value: The value to serialize.
+
+    Returns:
+        Serialized JSON text.
+
+    Raises:
+        If the value cannot be represented under the selected options.
+    """
     var writer = ChunkWriter(capacity_hint=len(value._bytes) + 32)
     _write_tape[options](writer, value._bytes, value._tape, value._entry)
     return writer^.finish()
@@ -86,7 +101,20 @@ def dumps[
 def dumps[
     options: SerializeOptions = SerializeOptions()
 ](doc: Document) raises -> String:
-    """Render a whole document — `dumps(doc)` is `dumps(doc.root())`."""
+    """Serializes a complete JSON document.
+
+    Parameters:
+        options: The serialization policy.
+
+    Args:
+        doc: The document to serialize.
+
+    Returns:
+        Serialized JSON text.
+
+    Raises:
+        If the document cannot be represented under the selected options.
+    """
     return dumps[options=options](doc.root())
 
 
@@ -325,19 +353,35 @@ struct Serializer(Movable):
     var _writer: ChunkWriter
 
     def __init__(out self, *, capacity_hint: Int = 256):
+        """Creates a serializer with an initial capacity hint.
+
+        Args:
+            capacity_hint: The expected output byte count.
+        """
         self._writer = ChunkWriter(capacity_hint=capacity_hint)
 
     def finish(deinit self) -> String:
+        """Finishes serialization and returns the output.
+
+        Returns:
+            The accumulated JSON text.
+        """
         return self._writer^.finish()
 
     # --- Scalars ---------------------------------------------------------------
 
     @always_inline
     def write_null(mut self):
+        """Writes a JSON null value."""
         self._writer.lit("null")
 
     @always_inline
     def write_bool(mut self, value: Bool):
+        """Writes a JSON boolean.
+
+        Args:
+            value: The boolean value.
+        """
         if value:
             self._writer.lit("true")
         else:
@@ -345,13 +389,31 @@ struct Serializer(Movable):
 
     @always_inline
     def write_int(mut self, value: Int64):
+        """Writes a signed JSON integer.
+
+        Args:
+            value: The integer value.
+        """
         write_int_i64(self._writer, value)
 
     @always_inline
     def write_uint(mut self, value: UInt64):
+        """Writes an unsigned JSON integer.
+
+        Args:
+            value: The integer value.
+        """
         write_uint_u64(self._writer, value)
 
     def write_float(mut self, value: Float64) raises:
+        """Writes a finite JSON number.
+
+        Args:
+            value: The floating-point value.
+
+        Raises:
+            If `value` is NaN or infinity.
+        """
         # RFC 8259 §6: NaN and Infinity are not JSON numbers.
         if value != value:
             raise Error("json.serialize: NaN is not representable in JSON")
@@ -361,8 +423,11 @@ struct Serializer(Movable):
         value.write_to(self._writer)
 
     def write_string(mut self, value: StringSlice):
-        """Quote and escape new text (the serde path — parsed spans never
-        come through here)."""
+        """Writes quoted and escaped JSON text.
+
+        Args:
+            value: The string content.
+        """
         self._writer.byte(B_QUOTE)
         _escape_into(self._writer, value.as_bytes())
         self._writer.byte(B_QUOTE)
@@ -371,25 +436,35 @@ struct Serializer(Movable):
 
     @always_inline
     def begin_object(mut self):
+        """Writes an object-opening delimiter."""
         self._writer.byte(B_LBRACE)
 
     @always_inline
     def end_object(mut self):
+        """Writes an object-closing delimiter."""
         self._writer.byte(B_RBRACE)
 
     @always_inline
     def begin_array(mut self):
+        """Writes an array-opening delimiter."""
         self._writer.byte(B_LBRACK)
 
     @always_inline
     def end_array(mut self):
+        """Writes an array-closing delimiter."""
         self._writer.byte(B_RBRACK)
 
     @always_inline
     def separator(mut self):
+        """Writes a value separator."""
         self._writer.byte(B_COMMA)
 
     def key(mut self, name: StringSlice):
+        """Writes an escaped object key and colon.
+
+        Args:
+            name: The object member name.
+        """
         self.write_string(name)
         self._writer.byte(B_COLON)
 

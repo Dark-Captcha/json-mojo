@@ -1,6 +1,6 @@
 # References — Standards Governing json-mojo
 
-> **Version:** 1.5.0 | **Updated:** 2026-07-03
+> **Version:** 1.6.0 | **Updated:** 2026-07-06
 
 Vendored and linked specifications for every byte this library parses or emits, with the constraints each imposes. Entries marked _candidate_ await the design discussion; the spec facts themselves are settled.
 
@@ -87,6 +87,14 @@ Spec-imposed facts the design must answer to. Where the spec leaves a choice, th
 | Source     | RFC Editor's canonical plain-text archive        |
 | Downloaded | 2026-07-02                                       |
 | License    | IETF Trust license permits verbatim reproduction |
+
+CI checks out external corpora at immutable revisions:
+
+| Corpus        | Revision                                   |
+| ------------- | ------------------------------------------ |
+| JSONTestSuite | `1ef36fa01286573e846ac449e8683f8833c5b26a` |
+| json5-tests   | `ceb24d4080137d70833f86c25659c1331b80a387` |
+| EmberJson     | `0d890bddae4ffd40cdab3f9f1b27f5feaa55dba7` |
 
 Re-fetch at any time:
 

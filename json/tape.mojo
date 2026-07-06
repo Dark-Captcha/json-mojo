@@ -1,3 +1,5 @@
+"""Exports the stable tape contract for alternate format front-ends."""
+
 # tape — the PUBLIC face of extension tier 2 (ARCHITECTURE.md): everything a
 # binary front-end may use to build or walk this library's six-kind tape.
 # The layout — uniform two-word entries `[tag:8 | flags:8 | a:48][b:64]`,

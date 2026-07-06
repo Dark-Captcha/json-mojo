@@ -1,3 +1,5 @@
+"""Decodes MessagePack bytes into JSON-compatible documents."""
+
 # decoder — MessagePack bytes → the json-mojo six-kind tape (extension
 # tier 2, ARCHITECTURE.md). The decode loop is iterative (explicit frame
 # stack, hostile-input depth cap — msgpack is length-prefixed, so bombs are
@@ -107,10 +109,18 @@ def _error(message: String, offset: Int) raises:
 
 
 def decode(var bytes: List[UInt8]) raises -> Document:
-    """Decode one MessagePack value (any type at the root) into a
-    `json.Document`. Raises on truncation, trailing bytes, depth > 1024,
-    invalid UTF-8 in strings, non-string map keys, `bin`/`ext` types, and
-    non-finite floats — every reject is named."""
+    """Decodes one JSON-compatible MessagePack value.
+
+    Args:
+        bytes: MessagePack bytes taken by move.
+
+    Returns:
+        A document backed by the shared JSON tape model.
+
+    Raises:
+        If the input is malformed, exceeds limits, has trailing bytes, or
+        contains a MessagePack type with no JSON representation.
+    """
     var length = len(bytes)
     var tail = String("")  # rendered numbers + re-escaped strings
     var tape = List[UInt64](capacity=16)

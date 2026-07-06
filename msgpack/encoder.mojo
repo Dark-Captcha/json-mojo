@@ -1,3 +1,5 @@
+"""Encodes JSON-compatible documents and values as MessagePack."""
+
 # encoder — the json-mojo tape → MessagePack bytes: `msgpack.dumps` completes
 # the transcoding pair (`decode` landed at 1.2.0). The walk is the serializer's
 # iterative pattern — innermost frame in locals, ancestors on a heap stack,
@@ -51,13 +53,35 @@ struct _WalkFrame(Copyable, Movable, TrivialRegisterPassable):
 
 
 def dumps(doc: Document) raises -> List[UInt8]:
-    """Encode a whole document as MessagePack — `dumps(doc)` is
-    `dumps(doc.root())`."""
+    """Encodes a complete document as MessagePack.
+
+    Args:
+        doc: The document to encode.
+
+    Returns:
+        MessagePack bytes.
+
+    Raises:
+        If a document value has no supported MessagePack representation.
+    """
     return dumps(doc.root())
 
 
 def dumps[origin: ImmutOrigin, //](value: Value[origin]) raises -> List[UInt8]:
-    """Encode the value under the cursor as MessagePack bytes."""
+    """Encodes a lazy value as MessagePack.
+
+    Parameters:
+        origin: The value's borrowed storage origin.
+
+    Args:
+        value: The value to encode.
+
+    Returns:
+        MessagePack bytes.
+
+    Raises:
+        If the value has no supported MessagePack representation.
+    """
     var out = List[UInt8](capacity=len(value._bytes) + 16)
     var bytes = value._bytes
     var tape = value._tape

@@ -1,3 +1,5 @@
+"""Implements RFC 6902 JSON Patch and RFC 7396 Merge Patch."""
+
 # patch — RFC 6902 JSON Patch and RFC 7396 JSON Merge Patch, built ENTIRELY
 # on the public `Value` surface plus `dumps` (extension tier 3, landed
 # in-core at 1.2.0 as the tier's first consumers — proof the cursor surface
@@ -19,10 +21,18 @@ from json.value import Value, ValueKind
 
 
 def apply_patch(doc: Document, patch: Document) raises -> Document:
-    """Apply an RFC 6902 patch (an array of operation objects) and return the
-    patched document. Operations apply sequentially — each sees the result of
-    the previous — and any failure (including a failed `test`) raises with
-    the operation's index; the input documents are never modified."""
+    """Applies an RFC 6902 JSON Patch.
+
+    Args:
+        doc: The source document.
+        patch: An array of operation objects.
+
+    Returns:
+        A new patched document.
+
+    Raises:
+        If the patch is malformed or an operation fails.
+    """
     if patch.kind() != ValueKind.ARRAY:
         raise Error("json.patch: a patch document must be an array")
     var current = dumps(doc)
@@ -40,8 +50,18 @@ def apply_patch(doc: Document, patch: Document) raises -> Document:
 
 
 def merge_patch(doc: Document, patch: Document) raises -> Document:
-    """Apply an RFC 7396 merge patch: objects merge member-wise, `null`
-    removes a member, and any non-object patch replaces the target."""
+    """Applies an RFC 7396 JSON Merge Patch.
+
+    Args:
+        doc: The source document.
+        patch: The merge-patch document.
+
+    Returns:
+        A new merged document.
+
+    Raises:
+        If either document cannot be traversed or serialized.
+    """
     var out = _merge_emit(doc.root(), patch.root())
     return parse(out^)
 

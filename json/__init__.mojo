@@ -1,3 +1,5 @@
+"""Provides parsing, serialization, typed serde, and JSON transformations."""
+
 # json — the public surface. Import from `json` directly
 # (`from json import loads, parse, Document`); the internal layout may move.
 # The set is ARCHITECTURE.md's Public Surface: sixteen functions, eleven types.

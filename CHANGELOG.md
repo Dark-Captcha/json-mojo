@@ -4,17 +4,24 @@ All notable changes to json-mojo. Format follows Keep a Changelog; versions foll
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-07-06
+
 ### Added
 
+- Typed `deserialize[List[T]]` and `deserialize[Dict[String, V]]`, including recursive containers and reflection-derived struct elements. Raising element conversions consume partially initialized containers with `destroy_with` before propagating the error.
 - GitHub Actions CI for the current Mojo package targets: `linux-64`, `linux-aarch64`, and `osx-arm64`.
 - Dependabot updates for pinned GitHub Actions.
 - `pixi run verify` for the release-grade generated and external corpus gates.
+- Repository instructions and upstream issue/proposal drafts aligned with Modular's current contribution and AI-assistance policies.
+- Strict public API documentation validation for `json`, `msgpack`, `bson`, and `cbor` through `pixi run doc`.
 
 ### Changed
 
 - Pixi now depends on the full `mojo` package instead of `mojo-compiler`, so fresh environments include the standard library.
 - The Pixi manifest declares all current upstream Mojo package platforms and documents Windows as WSL rather than native `win-*`.
-- README, architecture, and roadmap docs now reflect the shipped 1.5.0 public surface.
+- The minimum Mojo toolchain is `1.0.0b3.dev2026070506`, the first build verified to compile cross-module `List` and `Dict` `FromJson` conformance queries.
+- README, architecture, and roadmap docs now reflect the shipped 1.6.0 public surface.
+- CI actions and external conformance corpora are pinned to immutable commits.
 
 ## [1.5.0] — 2026-07-03
 

@@ -1,3 +1,5 @@
+"""Defines lazy JSON values, iteration, and typed conversion protocols."""
+
 # Value — the lazy cursor into a document's tape (ARCHITECTURE.md, Public
 # Surface). A Value is two spans (input bytes, tape words) plus an entry
 # index, borrowing its Document through an inferred origin: access chains
@@ -11,7 +13,7 @@
 # well-formed by invariant, which is what makes the non-validating String
 # construction in the escape decoder sound.
 
-from std.builtin.rebind import downcast
+from std.builtin.rebind import downcast, rebind_var
 from std.reflection import reflect
 
 from json._internal.bytes import B_0, B_1, B_9, B_SLASH, B_TILDE
@@ -46,49 +48,67 @@ struct ValueKind(Comparable, Copyable, Movable, TrivialRegisterPassable):
 
     var _code: UInt8
 
+    @doc_hidden
     @always_inline
     def __init__(out self, *, code: UInt8):
         self._code = code
 
+    @doc_hidden
     @always_inline
     def __eq__(self, other: ValueKind) -> Bool:
         return self._code == other._code
 
+    @doc_hidden
     @always_inline
     def __ne__(self, other: ValueKind) -> Bool:
         return self._code != other._code
 
+    @doc_hidden
     @always_inline
     def __lt__(self, other: ValueKind) -> Bool:
         return self._code < other._code
 
+    @doc_hidden
     @always_inline
     def __le__(self, other: ValueKind) -> Bool:
         return self._code <= other._code
 
+    @doc_hidden
     @always_inline
     def __gt__(self, other: ValueKind) -> Bool:
         return self._code > other._code
 
+    @doc_hidden
     @always_inline
     def __ge__(self, other: ValueKind) -> Bool:
         return self._code >= other._code
 
     comptime NULL: ValueKind = ValueKind(code=UInt8(0))
+    """The JSON null kind."""
     comptime BOOLEAN: ValueKind = ValueKind(code=UInt8(1))
+    """The JSON boolean kind."""
     comptime NUMBER: ValueKind = ValueKind(code=UInt8(2))
+    """The JSON number kind."""
     comptime STRING: ValueKind = ValueKind(code=UInt8(3))
+    """The JSON string kind."""
     comptime ARRAY: ValueKind = ValueKind(code=UInt8(4))
+    """The JSON array kind."""
     comptime OBJECT: ValueKind = ValueKind(code=UInt8(5))
+    """The JSON object kind."""
 
 
 struct Value[origin: ImmutOrigin](Copyable, Movable):
-    """A lazy cursor: nothing is converted or allocated until asked."""
+    """Provides a lazy cursor over one JSON value.
+
+    Parameters:
+        origin: The borrowed document-storage origin.
+    """
 
     var _bytes: Span[UInt8, Self.origin]
     var _tape: Span[UInt64, Self.origin]
     var _entry: Int
 
+    @doc_hidden
     @always_inline
     def __init__(
         out self,
@@ -105,10 +125,22 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
 
     @always_inline
     def kind(self) -> ValueKind:
+        """Gets this value's JSON kind.
+
+        Returns:
+            The value kind.
+        """
         return ValueKind(code=entry_tag(self._tape[self._entry * 2]))
 
     def __len__(self) raises -> Int:
-        """Element count of an array, member count of an object."""
+        """Gets an array or object's size.
+
+        Returns:
+            The element or live-member count.
+
+        Raises:
+            If this value is not an array or object.
+        """
         var tag = entry_tag(self._tape[self._entry * 2])
         if tag != TAG_ARRAY and tag != TAG_OBJECT:
             raise Error("json.value: len() on a non-container value")
@@ -123,6 +155,11 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
         ) != UInt8(0)
 
     def fits_int64(self) -> Bool:
+        """Checks whether this value converts exactly to `Int64`.
+
+        Returns:
+            True for a fitting JSON integer.
+        """
         if entry_tag(self._tape[self._entry * 2]) != TAG_NUMBER:
             return False
         if self._number_is_json5():
@@ -136,6 +173,11 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
         )
 
     def fits_uint64(self) -> Bool:
+        """Checks whether this value converts exactly to `UInt64`.
+
+        Returns:
+            True for a fitting non-negative JSON integer.
+        """
         if entry_tag(self._tape[self._entry * 2]) != TAG_NUMBER:
             return False
         if self._number_is_json5():
@@ -149,8 +191,11 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
         )
 
     def fits_float64(self) -> Bool:
-        """Converts to a FINITE Float64 — JSON5's Infinity/NaN answer False
-        here (they convert via `to[Float64]()` regardless)."""
+        """Checks whether this value converts to a finite `Float64`.
+
+        Returns:
+            True for a representable finite number.
+        """
         if entry_tag(self._tape[self._entry * 2]) != TAG_NUMBER:
             return False
         if self._number_is_json5():
@@ -170,9 +215,17 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
     # --- Access ----------------------------------------------------------------
 
     def __getitem__(self, key: String) raises -> Value[Self.origin]:
-        """Object member lookup — forward scan, first-wins early exit.
-        Members shadowed at parse time (LAST_WINS) are skipped, so the first
-        live match IS the last occurrence."""
+        """Looks up an object member by decoded name.
+
+        Args:
+            key: The decoded member name.
+
+        Returns:
+            The matching lazy value.
+
+        Raises:
+            If this value is not an object or the member is absent.
+        """
         var word0 = self._tape[self._entry * 2]
         if entry_tag(word0) != TAG_OBJECT:
             raise Error("json.value: [key] on a non-object value")
@@ -193,7 +246,17 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
         raise Error("json.value: member not found: " + key)
 
     def __getitem__(self, index: Int) raises -> Value[Self.origin]:
-        """Array element access by position."""
+        """Looks up an array element by position.
+
+        Args:
+            index: The zero-based element index.
+
+        Returns:
+            The matching lazy value.
+
+        Raises:
+            If this value is not an array or the index is out of range.
+        """
         var word0 = self._tape[self._entry * 2]
         if entry_tag(word0) != TAG_ARRAY:
             raise Error("json.value: [index] on a non-array value")
@@ -215,7 +278,14 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
     # --- Iteration (RFC 8259's own nouns: elements, members) --------------------
 
     def elements(self) raises -> _ElementIter[Self.origin]:
-        """Iterate an array's elements in document order."""
+        """Iterates array elements in document order.
+
+        Returns:
+            A lazy element iterator.
+
+        Raises:
+            If this value is not an array.
+        """
         var word0 = self._tape[self._entry * 2]
         if entry_tag(word0) != TAG_ARRAY:
             raise Error("json.value: elements() on a non-array value")
@@ -227,10 +297,14 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
         )
 
     def members(self) raises -> _MemberIter[Self.origin]:
-        """Iterate an object's members in document order — every member that
-        survived the parse-time duplicate policy: all occurrences under the
-        default FIRST_WINS (no detection is paid), survivors only under
-        LAST_WINS."""
+        """Iterates live object members in document order.
+
+        Returns:
+            A lazy member iterator honoring the duplicate policy.
+
+        Raises:
+            If this value is not an object.
+        """
         var word0 = self._tape[self._entry * 2]
         if entry_tag(word0) != TAG_OBJECT:
             raise Error("json.value: members() on a non-object value")
@@ -244,8 +318,17 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
     # --- RFC 6901 JSON Pointer ---------------------------------------------------
 
     def at(self, pointer: String) raises -> Value[Self.origin]:
-        """Resolve an RFC 6901 JSON Pointer (`/a/b/0`; `~0` → `~`, `~1` → `/`).
-        The empty pointer addresses this value itself."""
+        """Resolves an RFC 6901 JSON Pointer.
+
+        Args:
+            pointer: The pointer expression; empty addresses this value.
+
+        Returns:
+            The addressed lazy value.
+
+        Raises:
+            If the pointer is malformed or cannot be resolved.
+        """
         var pointer_bytes = pointer.as_bytes()
         var n = len(pointer_bytes)
         if n == 0:
@@ -303,14 +386,17 @@ struct Value[origin: ImmutOrigin](Copyable, Movable):
     # --- Conversion: the one generic gateway (Type Scheme, Layer 2) -------------
 
     def to[T: _ConvertBase](self) raises -> T:
-        """Convert this value to `T` — the one generic gateway (Type Scheme,
-        Layer 2): a `FromJson` conformance when declared, the reflection
-        field walk otherwise. There is no container arm: List/Dict reading
-        is blocked by a compiler ICE on cross-module conformance queries
-        (finding 36 — the ownership wall itself fell, mechanism retained in
-        .probe/) — the typed container read path is the cursor walk
-        (`elements()` / `members()`). The bound stays loose so trait-typed
-        references (the field walk's downcasts) satisfy it."""
+        """Converts this value through trait dispatch or reflection.
+
+        Parameters:
+            T: The target type.
+
+        Returns:
+            The converted value.
+
+        Raises:
+            If the JSON kind or value cannot convert to `T`.
+        """
         comptime if conforms_to(T, FromJson):
             # Direct static call — the comptime-if condition is the bound
             # evidence (findings 24/35); `downcast` here ICEs the compiler
@@ -491,12 +577,17 @@ struct _ElementIter[origin: ImmutOrigin](Copyable, Movable, Sized):
 
 
 struct Member[origin: ImmutOrigin](Copyable, Movable):
-    """One object member: a decoded key plus a lazy value cursor."""
+    """Provides a decoded object key and lazy value cursor.
+
+    Parameters:
+        origin: The borrowed document-storage origin.
+    """
 
     var _bytes: Span[UInt8, Self.origin]
     var _tape: Span[UInt64, Self.origin]
     var _key_entry: Int
 
+    @doc_hidden
     @always_inline
     def __init__(
         out self,
@@ -510,7 +601,11 @@ struct Member[origin: ImmutOrigin](Copyable, Movable):
         self._key_entry = key_entry
 
     def key(self) -> String:
-        """The member name, escape-decoded."""
+        """Decodes the member name.
+
+        Returns:
+            The decoded key string.
+        """
         var word0 = self._tape[self._key_entry * 2]
         var start = entry_a(word0)
         var end = Int(self._tape[self._key_entry * 2 + 1])
@@ -522,7 +617,11 @@ struct Member[origin: ImmutOrigin](Copyable, Movable):
 
     @always_inline
     def value(self) -> Value[Self.origin]:
-        """The member's value as a lazy cursor."""
+        """Gets the member value.
+
+        Returns:
+            The lazy value cursor.
+        """
         return Value[Self.origin](
             bytes=self._bytes, tape=self._tape, entry=self._key_entry + 1
         )
@@ -593,15 +692,41 @@ trait FromJson(_ConvertBase):
     def from_json[
         origin: ImmutOrigin, //
     ](value: Value[origin], out result: Self) raises:
+        """Converts a JSON value into this type.
+
+        Parameters:
+            origin: The source value's storage origin.
+
+        Args:
+            value: The source JSON value.
+
+        Returns:
+            The converted value through `result`.
+
+        Raises:
+            If conversion fails.
+        """
         ...
 
 
 def default_from_json[
     origin: ImmutOrigin, //, T: _ConvertBase
 ](value: Value[origin], out result: T) raises:
-    """Fill a struct's fields by name from an object value — the derivation
-    behind `FromJson`'s trait default. Field types dispatch through their own
-    `FromJson` conformances."""
+    """Fills a struct from object members using reflection.
+
+    Parameters:
+        origin: The source value's storage origin.
+        T: The target struct type.
+
+    Args:
+        value: The source object value.
+
+    Returns:
+        The populated struct through `result`.
+
+    Raises:
+        If the value is not an object or a field conversion fails.
+    """
     comptime r = reflect[T]
     comptime assert (
         r.is_struct()
@@ -694,14 +819,66 @@ __extension Optional(FromJson):
             result = Self(value.to[downcast[Self.T, _ConvertBase]]())
 
 
-# `List` and `Dict` reading: the ownership wall fell (finding 36 — an
-# accumulating raising body is legal when the raise path consumes the partial
-# container via `destroy_with`, with comptime-assert element evidence; probed
-# in `.probe/probe_container_walls.mojo`), but re-landing is blocked by a
-# compiler ICE on this pin: a CROSS-MODULE `conforms_to(List[X], FromJson)`
-# query crashes decl-body resolution of the extension (the same query against
-# `ToJson` is fine — serialization works). Re-attempt each nightly; until
-# then the typed container read path remains the cursor walk.
+def _drop_from_json_element[
+    ElementType: ImplicitlyDeletable
+](var element: ElementType):
+    pass
+
+
+__extension List(FromJson):
+    @staticmethod
+    def from_json[
+        origin: ImmutOrigin, //
+    ](value: Value[origin], out result: Self) raises:
+        comptime assert conforms_to(
+            Self.T, _ConvertBase
+        ), "json.value: list element must be convertible"
+        comptime assert conforms_to(
+            Self.T, ImplicitlyDeletable
+        ), "json.value: list element must be deletable"
+        result = Self()
+        try:
+            for element in value.elements():
+                result.append(element.to[downcast[Self.T, _ConvertBase]]())
+        except error:
+            result^.destroy_with(_drop_from_json_element[Self.T])
+            raise error^
+
+
+def _drop_from_json_pair[
+    KeyType: ImplicitlyDeletable,
+    ValueType: ImplicitlyDeletable,
+](var key: KeyType, var value: ValueType):
+    pass
+
+
+__extension Dict(FromJson):
+    @staticmethod
+    def from_json[
+        origin: ImmutOrigin, //
+    ](value: Value[origin], out result: Self) raises:
+        comptime assert (
+            reflect[Self.K].base_name() == "String"
+        ), "json.value: object target key must be String"
+        comptime assert conforms_to(
+            Self.V, _ConvertBase
+        ), "json.value: dictionary value must be convertible"
+        comptime assert conforms_to(
+            Self.V, ImplicitlyDeletable
+        ), "json.value: dictionary value must be deletable"
+        comptime assert conforms_to(
+            Self.K, ImplicitlyDeletable
+        ), "json.value: dictionary key must be deletable"
+        result = Self()
+        try:
+            for member in value.members():
+                var item: Self.V = member.value().to[
+                    downcast[Self.V, _ConvertBase]
+                ]()
+                result[rebind_var[Self.K](member.key())] = item^
+        except error:
+            result^.destroy_with(_drop_from_json_pair[Self.K, Self.V])
+            raise error^
 
 
 __extension SIMD(FromJson):

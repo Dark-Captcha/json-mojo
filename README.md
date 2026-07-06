@@ -1,6 +1,6 @@
 # json-mojo
 
-> **Version:** 1.5.0 | **Updated:** 2026-07-03
+> **Version:** 1.6.0 | **Updated:** 2026-07-06
 
 Spec-exact, SIMD-accelerated JSON for Mojo — a lazy tape engine with Python-easy verbs, zero dependencies, and a measured performance record.
 
@@ -25,6 +25,9 @@ struct Server(Copyable, Defaultable, Movable):  # no trait needed —
 
 var server = deserialize[Server]('{"host":"api.example.com","port":8443}')
 print(serialize(server))                # {"host":"api.example.com","port":8443}
+var servers = deserialize[List[Server]](
+    '[{"host":"api.example.com","port":8443}]'
+)
 print(dumps(data))                      # byte-faithful re-emission
 ```
 
@@ -51,7 +54,7 @@ JSON is how software talks — every API response, every config file, every AI-a
 
 ## Install
 
-Not yet on a package channel — consume 1.5.0 from source until the package
+Not yet on a package channel — consume 1.6.0 from source until the package
 publish step lands (ROADMAP.md):
 
 ```bash
@@ -151,11 +154,10 @@ Full record with conditions, protocols, and weaknesses in PERF.md. Headlines (AM
 
 Stated, not hidden:
 
-| Limit                                                   | Detail                                                                                                                                                                                                                                                                                       |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `deserialize[List[T]]` / `deserialize[Dict[String, V]]` | The ownership wall fell (finding 36 — working mechanism retained in `.probe/`), but a compiler ICE on cross-module conformance queries blocks re-landing on this pin; the typed container read path is the cursor walk (`elements()` / `members()`). Container **serialization** works fully |
-| Struct derivation contract                              | Be `Defaultable`, or have only trivially-destructible fields                                                                                                                                                                                                                                 |
-| Platform                                                | Pixi lock covers `linux-64`, `linux-aarch64`, and `osx-arm64`; Windows is supported through WSL until upstream Mojo ships native `win-*` packages                                                                                                                                            |
+| Limit                      | Detail                                                                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Struct derivation contract | Be `Defaultable`, or have only trivially-destructible fields                                                                                      |
+| Platform                   | Pixi lock covers `linux-64`, `linux-aarch64`, and `osx-arm64`; Windows is supported through WSL until upstream Mojo ships native `win-*` packages |
 
 ---
 

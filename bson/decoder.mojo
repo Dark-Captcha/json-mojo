@@ -1,3 +1,5 @@
+"""Decodes BSON bytes into JSON-compatible documents."""
+
 # decoder — BSON bytes → the json-mojo six-kind tape (extension tier 2,
 # bsonspec.org v1.1). Iterative frame walk (documents carry their byte
 # length up front; the trailing 0x00 closes each), appended-tail pattern for
@@ -110,10 +112,18 @@ def _u64_to_i64(bits: UInt64) -> Int64:
 
 
 def decode(var bytes: List[UInt8]) raises -> Document:
-    """Decode one BSON document (the root is always an object) into a
-    `json.Document`. Raises on truncation, trailing bytes, length
-    mismatches, depth > 1024, invalid UTF-8, non-finite doubles, and every
-    JSON-unrepresentable BSON type — each reject is named."""
+    """Decodes one JSON-compatible BSON document.
+
+    Args:
+        bytes: BSON bytes taken by move.
+
+    Returns:
+        A document backed by the shared JSON tape model.
+
+    Raises:
+        If framing is malformed, limits are exceeded, text is invalid, or a
+        BSON type has no JSON representation.
+    """
     var length = len(bytes)
     var tail = String("")
     var tape = List[UInt64](capacity=16)

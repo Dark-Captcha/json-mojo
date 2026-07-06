@@ -3,16 +3,17 @@ authors = ["Huỳnh Bảo Biên <baobien.dev@gmail.com>"]
 channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 name = "json-mojo"
 platforms = ["linux-64", "linux-aarch64", "osx-arm64"]
-version = "1.5.0"
+version = "1.6.0"
 
 [tasks]
 test = "mojo run -I . tests/run_tests.mojo && mojo run -I . tests/msgpack_generated.mojo && mojo run -I . tests/bson_generated.mojo && mojo run -I . tests/cbor_generated.mojo"
+doc = "mojo doc --diagnose-missing-doc-strings -Werror -o /tmp/json-mojo-doc.json json && mojo doc --diagnose-missing-doc-strings -Werror -o /tmp/msgpack-mojo-doc.json msgpack && mojo doc --diagnose-missing-doc-strings -Werror -o /tmp/bson-mojo-doc.json bson && mojo doc --diagnose-missing-doc-strings -Werror -o /tmp/cbor-mojo-doc.json cbor"
 verify = "mojo run -I . tests/floatdiff_generated.mojo && mojo run -I . tests/fuzz_generated.mojo && mojo run -I . tests/utf8_generated.mojo && bash tests/run_suite.sh && bash tests/run_json5_suite.sh"
 benchmark = "mojo run -I . benchmarks/run_benchmarks.mojo"
 example = "mojo run -I . examples/basic_usage.mojo && mojo run -I . examples/formats.mojo"
 
 [dependencies]
-mojo = ">=1.0.0b3.dev2026070206,<2"
+mojo = ">=1.0.0b3.dev2026070506,<2"
 
 [feature.dev.dependencies]
 mblack = "*"

@@ -3,15 +3,10 @@
 # path consumes the partial container via destroy_with, with comptime-assert
 # element evidence. This file compiles and runs green AS A STANDALONE MODULE.
 #
-# Re-landing in json/value.mojo is blocked by a compiler ICE on this pin:
-# once `__extension List(FromJson)` exists in value.mojo, any CROSS-MODULE
-# `conforms_to(List[X], FromJson)` query (the to[T] gateway's comptime-if)
-# crashes decl-body resolution — even with a trivial extension body. The
-# same query against ToJson works. Minimal reproducer:
-#     from json.value import FromJson
-#     print(conforms_to(List[Int64], FromJson))   # ICE
-# Re-attempt each nightly; the mechanism below is the implementation to
-# re-land.
+# The cross-module conformance-query compiler crash recorded by this probe was
+# fixed by Mojo 1.0.0b3.dev2026070506. The production implementation now lives
+# in json/value.mojo; this standalone module remains as an ownership regression
+# probe for the accumulating, raising container pattern.
 
 from json.value import Value
 from json import loads

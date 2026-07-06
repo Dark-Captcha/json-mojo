@@ -1,3 +1,5 @@
+"""Encodes JSON objects as BSON documents."""
+
 # encoder — the json-mojo tape → BSON bytes. The root must be a JSON object
 # (BSON's top level is always a document; an array root is REJECTED by name,
 # not silently wrapped). Document byte lengths back-patch through an offset
@@ -52,12 +54,35 @@ struct _Frame(Copyable, Movable, TrivialRegisterPassable):
 
 
 def dumps(doc: Document) raises -> List[UInt8]:
-    """Encode a whole document as BSON — the root must be an object."""
+    """Encodes a complete JSON object document as BSON.
+
+    Args:
+        doc: The document to encode.
+
+    Returns:
+        BSON bytes.
+
+    Raises:
+        If the root is not an object or a value has no BSON representation.
+    """
     return dumps(doc.root())
 
 
 def dumps[origin: ImmutOrigin, //](value: Value[origin]) raises -> List[UInt8]:
-    """Encode the object under the cursor as a BSON document."""
+    """Encodes a lazy JSON object as BSON.
+
+    Parameters:
+        origin: The value's borrowed storage origin.
+
+    Args:
+        value: The object value to encode.
+
+    Returns:
+        BSON bytes.
+
+    Raises:
+        If the value is not an object or has no BSON representation.
+    """
     if value.kind() != ValueKind.OBJECT:
         raise Error(
             "bson.dumps: BSON's top level is a document — the root must be"

@@ -1,3 +1,5 @@
+"""Provides reflection-derived and trait-controlled typed JSON serde."""
+
 # serde — the typed layer (ARCHITECTURE.md, Type Scheme Layers 2–3):
 # `ToJson` completes the two-trait protocol, `serialize`/`deserialize` are the
 # typed verbs, and compile-time reflection derives both directions for user
@@ -38,12 +40,30 @@ trait ToJson:
     same probed reason as `FromJson`)."""
 
     def to_json(self, mut serializer: Serializer) raises:
+        """Writes this value to a serializer.
+
+        Args:
+            serializer: The destination JSON serializer.
+
+        Raises:
+            If the value cannot be represented as JSON.
+        """
         ...
 
 
 def to_json_value[T: AnyType, //](value: T, mut serializer: Serializer) raises:
-    """The one serialize gateway: a declared `ToJson` conformance if present,
-    the reflection walk otherwise."""
+    """Writes a value through trait dispatch or reflection.
+
+    Parameters:
+        T: The source value type.
+
+    Args:
+        value: The value to serialize.
+        serializer: The destination serializer.
+
+    Raises:
+        If the value cannot be represented as JSON.
+    """
     comptime if conforms_to(T, ToJson):
         value.to_json(serializer)
     else:
@@ -71,8 +91,20 @@ def _default_to_json[
 
 
 def serialize[T: AnyType, //](value: T) raises -> String:
-    """Render any serializable value as JSON text — `ToJson` conformances and
-    reflection-derived structs alike."""
+    """Serializes a typed value as JSON text.
+
+    Parameters:
+        T: The source value type.
+
+    Args:
+        value: A trait-controlled or reflection-derived value.
+
+    Returns:
+        Compact JSON text.
+
+    Raises:
+        If the value cannot be represented as JSON.
+    """
     var serializer = Serializer()
     to_json_value(value, serializer)
     return serializer^.finish()
@@ -81,7 +113,21 @@ def serialize[T: AnyType, //](value: T) raises -> String:
 def deserialize[
     T: _ConvertBase, options: ParseOptions = ParseOptions()
 ](var text: String) raises -> T:
-    """Parse `text` and read a `T` straight off the tape — no DOM between."""
+    """Parses JSON directly into a typed value.
+
+    Parameters:
+        T: The target value type.
+        options: The parsing policy.
+
+    Args:
+        text: Source JSON text taken by move.
+
+    Returns:
+        The deserialized value.
+
+    Raises:
+        If parsing or typed conversion fails.
+    """
     var doc = parse[options](text^)
     return doc.to[T]()
 
@@ -89,7 +135,18 @@ def deserialize[
 def try_deserialize[
     T: _ConvertBase, options: ParseOptions = ParseOptions()
 ](var text: String) -> Optional[T]:
-    """`deserialize`, returning None instead of raising."""
+    """Attempts typed deserialization without raising.
+
+    Parameters:
+        T: The target value type.
+        options: The parsing policy.
+
+    Args:
+        text: Source JSON text taken by move.
+
+    Returns:
+        The deserialized value, or `None` on failure.
+    """
     try:
         return deserialize[T, options](text^)
     except error:

@@ -1,3 +1,5 @@
+"""Encodes JSON-compatible documents and values as CBOR."""
+
 # encoder — the json-mojo tape → CBOR bytes (RFC 8949): shortest-form
 # integer heads, definite lengths everywhere, float64 for every decimal
 # (valid, deterministic-adjacent CBOR — stated; shortest-float selection is
@@ -44,13 +46,35 @@ struct _WalkFrame(Copyable, Movable, TrivialRegisterPassable):
 
 
 def dumps(doc: Document) raises -> List[UInt8]:
-    """Encode a whole document as CBOR — `dumps(doc)` is
-    `dumps(doc.root())`."""
+    """Encodes a complete document as CBOR.
+
+    Args:
+        doc: The document to encode.
+
+    Returns:
+        CBOR bytes.
+
+    Raises:
+        If a document value has no supported CBOR representation.
+    """
     return dumps(doc.root())
 
 
 def dumps[origin: ImmutOrigin, //](value: Value[origin]) raises -> List[UInt8]:
-    """Encode the value under the cursor as CBOR bytes."""
+    """Encodes a lazy value as CBOR.
+
+    Parameters:
+        origin: The value's borrowed storage origin.
+
+    Args:
+        value: The value to encode.
+
+    Returns:
+        CBOR bytes.
+
+    Raises:
+        If the value has no supported CBOR representation.
+    """
     var out = List[UInt8](capacity=len(value._bytes) + 16)
     var bytes = value._bytes
     var tape = value._tape

@@ -825,8 +825,7 @@ def test_serde_struct_derivation() raises:
 
 
 def test_serde_containers() raises:
-    # Container SERIALIZATION — List, Dict, Optional through their ToJson
-    # extensions, composing recursively.
+    # Container serialization and deserialization compose recursively.
     var numbers = List[Int64]()
     numbers.append(1)
     numbers.append(2)
@@ -850,15 +849,55 @@ def test_serde_containers() raises:
     nested.append(inner^)
     _assert(serialize(nested) == "[[7]]", "containers compose recursively")
 
-    # Container DESERIALIZATION stays a documented limitation on this pin:
-    # the ownership wall fell (finding 36, probe retained), but a compiler
-    # ICE on cross-module conforms_to(List, FromJson) blocks re-landing.
-    # The supported read path is the cursor: elements()/members().
-    var doc = loads("[1,2,3]")
-    var total = Int64(0)
-    for element in doc.elements():
-        total += element.to[Int64]()
-    _assert(total == 6, "cursor walk is the container read path")
+    var decoded_numbers = deserialize[List[Int64]]("[1,2,3]")
+    _assert(
+        decoded_numbers[0] + decoded_numbers[1] + decoded_numbers[2] == 6,
+        "List deserializes",
+    )
+
+    var decoded_scores = deserialize[Dict[String, Int64]]('{"a":1,"b":2}')
+    _assert(
+        decoded_scores["a"] + decoded_scores["b"] == 3,
+        "Dict deserializes",
+    )
+
+    var decoded_nested = deserialize[List[List[Int64]]]("[[1,2],[3,4]]")
+    _assert(
+        decoded_nested[0][1] + decoded_nested[1][0] == 5,
+        "nested Lists deserialize",
+    )
+
+    var decoded_records = deserialize[List[ToolCall]](
+        '[{"name":"a","count":4,"enabled":true},'
+        '{"name":"b","count":5,"enabled":false}]'
+    )
+    _assert(
+        decoded_records[0].name == "a" and decoded_records[1].count == 5,
+        "List uses reflection-derived element conversion",
+    )
+
+    var decoded_record_map = deserialize[Dict[String, ToolCall]](
+        '{"item":{"name":"inside","count":6,"enabled":true}}'
+    )
+    _assert(
+        decoded_record_map["item"].name == "inside"
+        and decoded_record_map["item"].count == 6,
+        "Dict uses reflection-derived value conversion",
+    )
+
+    var container_errors = 0
+    try:
+        _ = deserialize[List[Int64]]('[1,"bad",3]')
+    except error:
+        container_errors += 1
+    try:
+        _ = deserialize[Dict[String, Int64]]('{"a":1,"b":"bad"}')
+    except error:
+        container_errors += 1
+    _assert(
+        container_errors == 2,
+        "partial containers are destroyed and conversion errors propagate",
+    )
 
     var bad = try_deserialize[ToolCall]('{"name":')
     _assert(not Bool(bad), "try_deserialize returns None on parse failure")

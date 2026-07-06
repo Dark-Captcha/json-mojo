@@ -1,3 +1,5 @@
+"""Decodes CBOR bytes into JSON-compatible documents."""
+
 # decoder — CBOR bytes → the json-mojo six-kind tape (extension tier 2,
 # RFC 8949). Iterative frame walk; definite AND indefinite arrays/maps
 # (the break byte closes; counts patch at close exactly like the JSON
@@ -95,8 +97,18 @@ def _half_to_double(bits: UInt64) -> Float64:
 
 
 def decode(var bytes: List[UInt8]) raises -> Document:
-    """Decode one CBOR data item (any type at the root) into a
-    `json.Document`. Every reject is named."""
+    """Decodes one JSON-compatible CBOR data item.
+
+    Args:
+        bytes: CBOR bytes taken by move.
+
+    Returns:
+        A document backed by the shared JSON tape model.
+
+    Raises:
+        If the input is malformed, exceeds limits, or contains a CBOR type
+        with no JSON representation.
+    """
     var length = len(bytes)
     var tail = String("")
     var tape = List[UInt64](capacity=16)

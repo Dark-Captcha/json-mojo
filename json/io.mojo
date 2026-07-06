@@ -1,3 +1,5 @@
+"""Provides JSON file, JSON Lines, and JSON text-sequence helpers."""
+
 # io — whole documents in and out: JSON Lines (NDJSON), RFC 7464 text
 # sequences, and file sugar. All of it is engine-neutral composition over
 # `parse` and `dumps` (ROADMAP "Near — capability", landed in 1.1.0): records
@@ -41,8 +43,17 @@ def _parse_record(
 
 
 def loads_lines(var text: String) raises -> List[Document]:
-    """Parse JSON Lines (NDJSON): one document per line, `\\n` or `\\r\\n`
-    delimited. Blank lines are skipped. Errors name the 1-based line."""
+    """Parses JSON Lines or NDJSON text.
+
+    Args:
+        text: Newline-delimited JSON text taken by move.
+
+    Returns:
+        One document per non-blank line.
+
+    Raises:
+        If any record is invalid; the error names its one-based line.
+    """
     var bytes = text.as_bytes()
     var docs = List[Document]()
     var start = 0
@@ -62,8 +73,17 @@ def loads_lines(var text: String) raises -> List[Document]:
 
 
 def dumps_lines(docs: List[Document]) raises -> String:
-    """Emit JSON Lines: each document compact on its own `\\n`-terminated
-    line."""
+    """Serializes documents as JSON Lines.
+
+    Args:
+        docs: The documents to serialize.
+
+    Returns:
+        Compact JSON records terminated by newlines.
+
+    Raises:
+        If a document cannot be serialized.
+    """
     var out = String("")
     for i in range(len(docs)):
         out += dumps(docs[i])
@@ -72,9 +92,17 @@ def dumps_lines(docs: List[Document]) raises -> String:
 
 
 def loads_seq(var text: String) raises -> List[Document]:
-    """Parse an RFC 7464 JSON text sequence: records begin with RS (0x1E).
-    Content before the first RS must be blank; blank records are skipped.
-    Errors name the 1-based record."""
+    """Parses an RFC 7464 JSON text sequence.
+
+    Args:
+        text: Record-separator-delimited JSON text taken by move.
+
+    Returns:
+        One document per non-blank record.
+
+    Raises:
+        If framing or a record is invalid.
+    """
     var bytes = text.as_bytes()
     var length = text.byte_length()
     var docs = List[Document]()
@@ -97,7 +125,17 @@ def loads_seq(var text: String) raises -> List[Document]:
 
 
 def dumps_seq(docs: List[Document]) raises -> String:
-    """Emit an RFC 7464 text sequence: `RS json LF` per record (§2.2)."""
+    """Serializes documents as an RFC 7464 text sequence.
+
+    Args:
+        docs: The documents to serialize.
+
+    Returns:
+        One `RS json LF` frame per document.
+
+    Raises:
+        If a document cannot be serialized.
+    """
     var out = String("")
     for i in range(len(docs)):
         out += "\x1e"
@@ -107,13 +145,30 @@ def dumps_seq(docs: List[Document]) raises -> String:
 
 
 def load(path: String) raises -> Document:
-    """Read a file and parse it — `load` is `loads` for a path. Bytes reach
-    this library's validator directly (no decoding layer)."""
+    """Reads and parses a JSON file.
+
+    Args:
+        path: The input file path.
+
+    Returns:
+        The parsed document.
+
+    Raises:
+        If the file cannot be read or does not contain valid JSON.
+    """
     with open(path, "r") as f:
         return loads_bytes(f.read_bytes())
 
 
 def dump(doc: Document, path: String) raises:
-    """Serialize a document (compact) and write it to a file."""
+    """Serializes a document to a file.
+
+    Args:
+        doc: The document to serialize.
+        path: The output file path.
+
+    Raises:
+        If serialization or file writing fails.
+    """
     with open(path, "w") as f:
         f.write(dumps(doc))

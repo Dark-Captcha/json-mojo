@@ -1,3 +1,5 @@
+"""Defines compile-time JSON parsing and serialization policies."""
+
 # options — the comptime knobs (ARCHITECTURE.md, Public Surface). Every
 # field is policy, not grammar; defaults were chosen by hot-path analysis.
 # Passed as comptime parameters, each distinct value monomorphizes its own
@@ -17,37 +19,47 @@ struct DuplicatePolicy(Comparable, Copyable, Movable, TrivialRegisterPassable):
 
     var _code: UInt8
 
+    @doc_hidden
     @always_inline
     def __init__(out self, *, code: UInt8):
         self._code = code
 
+    @doc_hidden
     @always_inline
     def __eq__(self, other: DuplicatePolicy) -> Bool:
         return self._code == other._code
 
+    @doc_hidden
     @always_inline
     def __ne__(self, other: DuplicatePolicy) -> Bool:
         return self._code != other._code
 
+    @doc_hidden
     @always_inline
     def __lt__(self, other: DuplicatePolicy) -> Bool:
         return self._code < other._code
 
+    @doc_hidden
     @always_inline
     def __le__(self, other: DuplicatePolicy) -> Bool:
         return self._code <= other._code
 
+    @doc_hidden
     @always_inline
     def __gt__(self, other: DuplicatePolicy) -> Bool:
         return self._code > other._code
 
+    @doc_hidden
     @always_inline
     def __ge__(self, other: DuplicatePolicy) -> Bool:
         return self._code >= other._code
 
     comptime FIRST_WINS: DuplicatePolicy = DuplicatePolicy(code=UInt8(0))
+    """Keeps the first occurrence of a duplicate member name."""
     comptime LAST_WINS: DuplicatePolicy = DuplicatePolicy(code=UInt8(1))
+    """Keeps the last occurrence of a duplicate member name."""
     comptime REJECT: DuplicatePolicy = DuplicatePolicy(code=UInt8(2))
+    """Rejects duplicate member names."""
 
 
 struct ParseMode(Comparable, Copyable, Movable, TrivialRegisterPassable):
@@ -58,36 +70,45 @@ struct ParseMode(Comparable, Copyable, Movable, TrivialRegisterPassable):
 
     var _code: UInt8
 
+    @doc_hidden
     @always_inline
     def __init__(out self, *, code: UInt8):
         self._code = code
 
+    @doc_hidden
     @always_inline
     def __eq__(self, other: ParseMode) -> Bool:
         return self._code == other._code
 
+    @doc_hidden
     @always_inline
     def __ne__(self, other: ParseMode) -> Bool:
         return self._code != other._code
 
+    @doc_hidden
     @always_inline
     def __lt__(self, other: ParseMode) -> Bool:
         return self._code < other._code
 
+    @doc_hidden
     @always_inline
     def __le__(self, other: ParseMode) -> Bool:
         return self._code <= other._code
 
+    @doc_hidden
     @always_inline
     def __gt__(self, other: ParseMode) -> Bool:
         return self._code > other._code
 
+    @doc_hidden
     @always_inline
     def __ge__(self, other: ParseMode) -> Bool:
         return self._code >= other._code
 
     comptime STANDARD: ParseMode = ParseMode(code=UInt8(0))
+    """Applies RFC 8259 parsing semantics."""
     comptime I_JSON: ParseMode = ParseMode(code=UInt8(1))
+    """Applies the stricter RFC 7493 I-JSON profile."""
 
 
 struct Dialect(Comparable, Copyable, Movable, TrivialRegisterPassable):
@@ -99,36 +120,45 @@ struct Dialect(Comparable, Copyable, Movable, TrivialRegisterPassable):
 
     var _code: UInt8
 
+    @doc_hidden
     @always_inline
     def __init__(out self, *, code: UInt8):
         self._code = code
 
+    @doc_hidden
     @always_inline
     def __eq__(self, other: Dialect) -> Bool:
         return self._code == other._code
 
+    @doc_hidden
     @always_inline
     def __ne__(self, other: Dialect) -> Bool:
         return self._code != other._code
 
+    @doc_hidden
     @always_inline
     def __lt__(self, other: Dialect) -> Bool:
         return self._code < other._code
 
+    @doc_hidden
     @always_inline
     def __le__(self, other: Dialect) -> Bool:
         return self._code <= other._code
 
+    @doc_hidden
     @always_inline
     def __gt__(self, other: Dialect) -> Bool:
         return self._code > other._code
 
+    @doc_hidden
     @always_inline
     def __ge__(self, other: Dialect) -> Bool:
         return self._code >= other._code
 
     comptime JSON: Dialect = Dialect(code=UInt8(0))
+    """Selects the RFC 8259 JSON grammar."""
     comptime JSON5: Dialect = Dialect(code=UInt8(1))
+    """Selects the JSON5 grammar."""
 
 
 struct ParseOptions(Copyable, Movable, TrivialRegisterPassable):
@@ -136,9 +166,13 @@ struct ParseOptions(Copyable, Movable, TrivialRegisterPassable):
     hot-path analysis in ARCHITECTURE.md."""
 
     var max_depth: Int
+    """The maximum permitted array and object nesting depth."""
     var duplicates: DuplicatePolicy
+    """The duplicate object-member policy."""
     var mode: ParseMode
+    """The JSON strictness profile."""
     var dialect: Dialect
+    """The input text grammar."""
 
     @always_inline
     def __init__(
@@ -149,6 +183,14 @@ struct ParseOptions(Copyable, Movable, TrivialRegisterPassable):
         mode: ParseMode = ParseMode.STANDARD,
         dialect: Dialect = Dialect.JSON,
     ):
+        """Creates a parsing policy.
+
+        Args:
+            max_depth: The maximum container nesting depth.
+            duplicates: The duplicate member-name policy.
+            mode: The JSON strictness profile.
+            dialect: The input text grammar.
+        """
         self.max_depth = max_depth
         self.duplicates = duplicates
         self.mode = mode
@@ -156,7 +198,11 @@ struct ParseOptions(Copyable, Movable, TrivialRegisterPassable):
 
     @always_inline
     def rejects_duplicates(self) -> Bool:
-        """The effective duplicate stance — `I_JSON` mode forces rejection."""
+        """Checks the effective duplicate-name policy.
+
+        Returns:
+            True when duplicate member names must be rejected.
+        """
         return (
             self.duplicates == DuplicatePolicy.REJECT
             or self.mode == ParseMode.I_JSON
@@ -164,15 +210,20 @@ struct ParseOptions(Copyable, Movable, TrivialRegisterPassable):
 
     @always_inline
     def rejects_noncharacters(self) -> Bool:
-        """RFC 7493 §2.1: I-JSON strings must not contain Unicode
-        noncharacters (U+FDD0..U+FDEF and the last two code points of every
-        plane), raw or escaped."""
+        """Checks whether Unicode noncharacters must be rejected.
+
+        Returns:
+            True for the RFC 7493 I-JSON profile.
+        """
         return self.mode == ParseMode.I_JSON
 
     @always_inline
     def shadows_duplicates(self) -> Bool:
-        """`LAST_WINS` shadows earlier duplicates at parse time — unless the
-        mode already escalates duplicates to rejection."""
+        """Checks whether later duplicate members shadow earlier ones.
+
+        Returns:
+            True for effective last-wins parsing.
+        """
         return (
             self.duplicates == DuplicatePolicy.LAST_WINS
             and not self.rejects_duplicates()
@@ -198,8 +249,11 @@ struct SerializeOptions(Copyable, Movable, TrivialRegisterPassable):
     callers."""
 
     var pretty: Bool
+    """Whether to emit line breaks and indentation."""
     var indent: Int
+    """The indentation width per container depth."""
     var indent_byte: UInt8
+    """The byte used for indentation."""
 
     @always_inline
     def __init__(
@@ -209,6 +263,13 @@ struct SerializeOptions(Copyable, Movable, TrivialRegisterPassable):
         indent: Int = 2,
         indent_byte: UInt8 = B_SPACE,
     ):
+        """Creates a serialization policy.
+
+        Args:
+            pretty: Whether to emit formatted output.
+            indent: The indentation width per depth level.
+            indent_byte: The indentation byte, normally space or tab.
+        """
         debug_assert(indent >= 0, "indent width must be non-negative")
         self.pretty = pretty
         self.indent = indent

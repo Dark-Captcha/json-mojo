@@ -1,6 +1,6 @@
 # Architecture — json-mojo
 
-> **Version:** 1.5.0 | **Updated:** 2026-07-03
+> **Version:** 1.6.0 | **Updated:** 2026-07-06
 
 Purpose, binding contracts, and system map of json-mojo — the criteria every structural decision in this library is judged against.
 
@@ -133,13 +133,13 @@ value.to[Float64]()    # to the FromJson conformance of the target
 value.to[MyStruct]()   # structs derive via reflection — no conformance
 ```
 
-The honest mechanics under the gateway, settled by probes (`.probe/SYNTAX.md`, findings 20–37): `__extension` retroactive conformance EXISTS on this toolchain, so primitives (`Bool`, `String`, every SIMD scalar width) and `Optional` conform to `FromJson` directly, and all containers conform to `ToJson`. Two toolchain limits shape the rest: extensions must live in the trait's own module, and `List`/`Dict` **deserialization** remains a recorded limitation — the ownership wall itself fell (finding 36: an accumulating raising body is legal when the raise path consumes the partial container via `destroy_with`; the working implementation is retained in `.probe/probe_container_walls.mojo`), but re-landing is blocked by a compiler ICE on cross-module `conforms_to(List[X], FromJson)` queries on this pin, re-attempted each nightly. The typed read path for containers is the cursor walk (`elements()` / `members()`); their serialization works fully. Plain structs need no conformance at all in either direction — `to[T]`, `deserialize[T]`, and `serialize` derive them through the reflection field walk; conforming to a trait is only for custom control.
+The honest mechanics under the gateway, settled by probes (`.probe/SYNTAX.md`, findings 20–37): `__extension` retroactive conformance exists on this toolchain, so primitives (`Bool`, `String`, every SIMD scalar width), `Optional`, `List`, and `Dict` conform to `FromJson`; all containers conform to `ToJson`. Accumulating container reads consume a partially initialized container with `destroy_with` before propagating an element error, preserving ownership on every raising path. Extensions must live in the trait's own module. Plain structs need no conformance in either direction — `to[T]`, `deserialize[T]`, and `serialize` derive them through the reflection field walk; conforming to a trait is only for custom control.
 
 Numbers get one honest introspection surface instead of guesswork: `kind()`, plus — for numbers — whether the value fits `Int64`, fits `UInt64`, converts to a finite `Float64` (IEEE 754 round-to-even — overflow is the only refusal), or exceeds all three; the raw span is always available.
 
 ### Layer 3 — The Bindings
 
-Reading (`to[T]` / `deserialize[T]`): `Bool`; every integer width `Int8`…`Int64`, `UInt8`…`UInt64`, `Int` (narrow targets are exact-or-error, never a silent truncation); `Float32`/`Float64`; `String`; `Optional[T]` (missing member and `null` both read as `None`); and structs via compile-time reflection with zero ceremony — no conformance declared (be `Defaultable`, or have only trivially-destructible fields). `List`/`Dict` reading is the recorded v1 toolchain limitation above.
+Reading (`to[T]` / `deserialize[T]`): `Bool`; every integer width `Int8`…`Int64`, `UInt8`…`UInt64`, `Int` (narrow targets are exact-or-error, never a silent truncation); `Float32`/`Float64`; `String`; `Optional[T]` (missing member and `null` both read as `None`); `List[T]`; `Dict[String, V]`; and structs via compile-time reflection with zero ceremony — no conformance declared (be `Defaultable`, or have only trivially-destructible fields). Containers compose recursively and may contain reflection-derived structs.
 
 Writing (`serialize` / `dumps`): everything — the same scalar tower plus `List[T]`, `Dict[String, V]`, `Optional[T]`, and reflection-derived structs, composing recursively.
 

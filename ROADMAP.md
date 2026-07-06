@@ -1,8 +1,8 @@
 # Roadmap
 
-> **Version:** 1.5.0 | **Updated:** 2026-07-03
+> **Version:** 1.6.0 | **Updated:** 2026-07-06
 
-Direction after v1.3.0, ordered by leverage. PERF.md's weakness table is the performance source of truth; ARCHITECTURE.md's extension tiers are the scope source of truth. As of 1.3.0 every shipped format is BIDIRECTIONAL: JSON and JSON5 in, JSON out (JSON5 normalizes); MessagePack, BSON, and CBOR decode AND encode over the stable tape contract.
+Direction after v1.6.0, ordered by leverage. PERF.md's weakness table is the performance source of truth; ARCHITECTURE.md's extension tiers are the scope source of truth. Every shipped format is bidirectional: JSON and JSON5 in, JSON out (JSON5 normalizes); MessagePack, BSON, and CBOR decode and encode over the stable tape contract. Typed JSON serde includes recursively composed `List[T]` and `Dict[String, V]` reads and writes.
 
 ---
 
@@ -18,12 +18,11 @@ Shipped items leave this file — CHANGELOG.md records them (stage-1 atom hints 
 
 ## Near — capability
 
-| Item                                        | Why                                                                                                                                                                                                   |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Container deserialization (`List` / `Dict`) | The ownership wall FELL (finding 36; working mechanism retained in `.probe/probe_container_walls.mojo`) — blocked only by a compiler ICE on cross-module conformance queries; re-attempt each nightly |
-| Publish the conda packages                  | Source-only today (`json` + `msgpack` + `bson` + `cbor` ride one repo). Versioning sorts above the retired prototype's recipe; the remaining decision is the package name(s)                          |
-| Native Windows package target               | Mojo currently supports Windows through WSL; add native `win-*` only when upstream packages exist for the target                                                                                      |
-| `parse_view` borrowed zero-copy variant     | For arena/buffer-reuse experts, behind an origin-ergonomics probe (tier 1)                                                                                                                            |
+| Item                                    | Why                                                                                                                                                                                                                                      |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Publish the conda package               | The recipe can be prepared and tested against the nightly channel, but modular-community currently builds against the stable channel. Publish when Mojo `1.0.0b3` reaches that channel or the registry accepts nightly compiler recipes. |
+| Native Windows package target           | Mojo currently supports Windows through WSL; add native `win-*` only when upstream packages exist for the target.                                                                                                                        |
+| `parse_view` borrowed zero-copy variant | For arena/buffer-reuse experts, behind an origin-ergonomics probe (tier 1).                                                                                                                                                              |
 
 ## Far — ecosystem
 
