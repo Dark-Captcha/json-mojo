@@ -67,11 +67,12 @@ jobs:
       - name: Test
         run: pixi run test
 
-      - name: Fetch verification corpora
+      - name: Fetch external corpora
         if: matrix.full_checks
         run: |
           git clone --depth 1 https://github.com/nst/JSONTestSuite references/JSONTestSuite
           git clone --depth 1 https://github.com/json5/json5-tests references/json5-tests
+          git clone --depth 1 https://github.com/bgreni/EmberJson references/EmberJson
 
       - name: Verify
         if: matrix.full_checks
