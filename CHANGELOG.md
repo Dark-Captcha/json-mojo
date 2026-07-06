@@ -14,6 +14,7 @@ All notable changes to json-mojo. Format follows Keep a Changelog; versions foll
 - `pixi run verify` for the release-grade generated and external corpus gates.
 - Repository instructions and upstream issue/proposal drafts aligned with Modular's current contribution and AI-assistance policies.
 - Strict public API documentation validation for `json`, `msgpack`, `bson`, and `cbor` through `pixi run doc`.
+- A rattler-build community-package recipe with an installed-package smoke test covering typed container serde.
 
 ### Changed
 

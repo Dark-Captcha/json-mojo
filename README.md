@@ -54,8 +54,9 @@ JSON is how software talks — every API response, every config file, every AI-a
 
 ## Install
 
-Not yet on a package channel — consume 1.6.0 from source until the package
-publish step lands (ROADMAP.md):
+Not yet on a package channel. A tested modular-community recipe is prepared in
+`conda.recipe/`; consume 1.6.0 from source until Mojo `1.0.0b3` reaches the
+stable compiler channel and the recipe is accepted:
 
 ```bash
 git clone <this repository> json-mojo
