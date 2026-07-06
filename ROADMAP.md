@@ -22,6 +22,7 @@ Shipped items leave this file — CHANGELOG.md records them (stage-1 atom hints 
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Container deserialization (`List` / `Dict`) | The ownership wall FELL (finding 36; working mechanism retained in `.probe/probe_container_walls.mojo`) — blocked only by a compiler ICE on cross-module conformance queries; re-attempt each nightly |
 | Publish the conda packages                  | Source-only today (`json` + `msgpack` + `bson` + `cbor` ride one repo). Versioning sorts above the retired prototype's recipe; the remaining decision is the package name(s)                          |
+| Native Windows package target               | Mojo currently supports Windows through WSL; add native `win-*` only when upstream packages exist for the target                                                                                      |
 | `parse_view` borrowed zero-copy variant     | For arena/buffer-reuse experts, behind an origin-ergonomics probe (tier 1)                                                                                                                            |
 
 ## Far — ecosystem

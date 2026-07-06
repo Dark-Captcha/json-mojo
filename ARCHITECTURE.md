@@ -214,7 +214,7 @@ Grammar supersets join post-v1 as a typed field with a default that preserves ev
 | `FromJson` / `ToJson`               | The conversion protocol (Type Scheme, Layer 2)                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `Serializer`                        | What `ToJson` implementations write into — Writer-backed                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
-Twenty-seven public names in total — sixteen functions (the eight frozen at 0.1.0: `parse`, `try_parse`, `loads`, `loads_bytes`, `dumps`, `deserialize`, `try_deserialize`, `serialize`; six added at 1.1.0: `loads_lines`, `dumps_lines`, `loads_seq`, `dumps_seq`, `load`, `dump`; two at 1.2.0: `apply_patch`, `merge_patch`), eleven types (`Dialect` joined at 1.2.0). The `msgpack`, `bson`, and `cbor` sibling packages each add `decode` and `dumps` under their own namespaces — every binary format is bidirectional over the tape contract as of 1.3.0. `Member`, the yield type of `members()`, is package-public but deliberately un-exported — callers meet it through iteration, like a stdlib dict entry. File input/output sugar (`load`/`dump`) is deferred alongside JSON Lines: the primary audience holds bytes, not paths.
+Twenty-seven public names in total — sixteen functions (the eight frozen at 0.1.0: `parse`, `try_parse`, `loads`, `loads_bytes`, `dumps`, `deserialize`, `try_deserialize`, `serialize`; six added at 1.1.0: `loads_lines`, `dumps_lines`, `loads_seq`, `dumps_seq`, `load`, `dump`; two at 1.2.0: `apply_patch`, `merge_patch`), eleven types (`Dialect` joined at 1.2.0). The `msgpack`, `bson`, and `cbor` sibling packages each add `decode` and `dumps` under their own namespaces — every binary format is bidirectional over the tape contract as of 1.3.0. `Member`, the yield type of `members()`, is package-public but deliberately un-exported — callers meet it through iteration, like a stdlib dict entry.
 
 ### Decisions This Surface Settles
 
@@ -240,15 +240,14 @@ Multi-protocol support must never tax the strict path. Two mechanisms carry that
 
 ## Non-Goals and Extension Paths
 
-| Excluded                                                 | Reason                                                                  | Belongs to                                                                     |
-| -------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Lenient syntax — comments, trailing commas, JSON5        | The v1 grammar is RFC 8259, exactly; silent leniency breaks interchange | A post-v1 `Dialect` value — extension tier 1, explicit and typed, never silent |
-| Query engine (JSONPath, RFC 9535)                        | Selection expressions are a language of their own                       | A library that builds on this one                                              |
-| Document mutation (Patch RFC 6902, Merge Patch RFC 7396) | Operation formats over documents, not document processing               | A library that builds on this one                                              |
-| Schema validation                                        | A constraint language above the data layer                              | A library that builds on this one                                              |
-| Binary JSON siblings (BSON, CBOR, MessagePack)           | Different wire formats with different specs                             | Dedicated format libraries                                                     |
+| Excluded                                | Reason                                                                 | Belongs to                                                                        |
+| --------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Query engine (JSONPath, RFC 9535)       | Selection expressions are a language of their own                      | A library that builds on this one                                                 |
+| Schema validation                       | A constraint language above the data layer                             | A library that builds on this one                                                 |
+| Native Windows package target           | Mojo is currently installed on Windows through WSL, not native `win-*` | Add when upstream `mojo` packages and a supported runner exist for native Windows |
+| Additional binary foreign-type mappings | BSON/CBOR/MessagePack can encode data outside JSON's six-kind alphabet | Explicit opt-in policy knobs; never a silent default                              |
 
-Struct binding, once deliberately unlisted here, is now settled in scope (Type Scheme, Layer 3). One scope question remains open: streaming interfaces — JSON Lines and RFC 7464 text sequences. Both incumbents ship JSON Lines; it is engine-neutral sugar (split, then `parse` per document) and a strong fast-follow candidate rather than a v1 blocker.
+Struct binding, JSON Lines/RFC 7464 I/O, JSON5, RFC 6902/RFC 7396 patches, and the three binary siblings are now settled in scope and shipped.
 
 ### Extension Paths
 
@@ -278,7 +277,7 @@ Every byte this library parses or emits has a named authority. The vendored spec
 
 ```text
 json/
-├── __init__.mojo        # re-exports only — the eighteen public names
+├── __init__.mojo        # re-exports only — the package root's public names
 ├── options.mojo         # ParseOptions, SerializeOptions, ParseMode, DuplicatePolicy
 ├── document.mojo        # Document + parse / try_parse / loads / loads_bytes
 ├── value.mojo           # Value, ValueKind, Member, iterators, FromJson + conformances,

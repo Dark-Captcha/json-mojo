@@ -2,6 +2,20 @@
 
 All notable changes to json-mojo. Format follows Keep a Changelog; versions follow SemVer once past 1.0.
 
+## [Unreleased]
+
+### Added
+
+- GitHub Actions CI for the current Mojo package targets: `linux-64`, `linux-aarch64`, and `osx-arm64`.
+- Dependabot updates for pinned GitHub Actions.
+- `pixi run verify` for the release-grade generated and external corpus gates.
+
+### Changed
+
+- Pixi now depends on the full `mojo` package instead of `mojo-compiler`, so fresh environments include the standard library.
+- The Pixi manifest declares all current upstream Mojo package platforms and documents Windows as WSL rather than native `win-*`.
+- README, architecture, and roadmap docs now reflect the shipped 1.5.0 public surface.
+
 ## [1.5.0] — 2026-07-03
 
 Stringify parity: `dumps` grows the Python `indent=N` / JS `space=N` knobs as comptime fields — every combination monomorphizes and the compact path never carries a pretty branch.

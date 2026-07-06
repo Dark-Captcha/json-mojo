@@ -51,8 +51,8 @@ JSON is how software talks — every API response, every config file, every AI-a
 
 ## Install
 
-Not yet on a package channel — v0.1.0 is consumed from source (publishing is a
-roadmap item, ROADMAP.md):
+Not yet on a package channel — consume 1.5.0 from source until the package
+publish step lands (ROADMAP.md):
 
 ```bash
 git clone <this repository> json-mojo
@@ -67,11 +67,15 @@ mojo build -I path/to/json-mojo your_program.mojo
 
 Pure Mojo — no C toolchain, no FFI, no transitive native dependencies.
 
+Supported Pixi targets are `linux-64`, `linux-aarch64`, and `osx-arm64`.
+Windows users run through WSL; native Windows and Intel macOS are not listed
+until upstream `mojo` packages exist for those targets.
+
 ---
 
 ## Surface
 
-Fourteen functions, ten types (ARCHITECTURE.md, Public Surface):
+Sixteen functions, eleven types at the package root (ARCHITECTURE.md, Public Surface):
 
 | Name                                                                      | Purpose                                                                                                                                                                                         |
 | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -113,7 +117,8 @@ Numbers are lossless raw text on the tape — a 300-digit integer round-trips ex
 
 ## Verification Record
 
-Every release re-earns all of it (commands in PERF.md, Reproducing):
+Every release re-earns all of it (`pixi run test` plus `pixi run verify`;
+commands in PERF.md, Reproducing):
 
 | Gate                                        | Result                                                                        |
 | ------------------------------------------- | ----------------------------------------------------------------------------- |
@@ -150,8 +155,7 @@ Stated, not hidden:
 | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `deserialize[List[T]]` / `deserialize[Dict[String, V]]` | The ownership wall fell (finding 36 — working mechanism retained in `.probe/`), but a compiler ICE on cross-module conformance queries blocks re-landing on this pin; the typed container read path is the cursor walk (`elements()` / `members()`). Container **serialization** works fully |
 | Struct derivation contract                              | Be `Defaultable`, or have only trivially-destructible fields                                                                                                                                                                                                                                 |
-| Streaming / JSON Lines                                  | Deferred — a fast-follow, not a v1 blocker (ARCHITECTURE.md, Non-Goals)                                                                                                                                                                                                                      |
-| Platform                                                | linux-64 developed and measured; portable SIMD by construction                                                                                                                                                                                                                               |
+| Platform                                                | Pixi lock covers `linux-64`, `linux-aarch64`, and `osx-arm64`; Windows is supported through WSL until upstream Mojo ships native `win-*` packages                                                                                                                                            |
 
 ---
 
