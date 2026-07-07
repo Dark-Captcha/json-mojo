@@ -49,15 +49,17 @@ struct Document(Movable):
     def __init__(
         out self, *, var unsafe_buffer: String, var unsafe_tape: List[UInt64]
     ):
-        """Wraps a decoder-built buffer and tape as a document.
+        """Wraps a trusted document buffer and tape as a document.
 
         Args:
-            unsafe_buffer: The owned source and decoder arena bytes.
+            unsafe_buffer: The owned JSON source text or decoder-built
+                JSON-text arena.
             unsafe_tape: A well-formed six-kind tape whose spans reference
                 `unsafe_buffer`.
 
-        The caller must guarantee that every span is in bounds, strings hold
-        validated escaped JSON content, and numbers follow RFC 8259 grammar.
+        The caller must guarantee that `unsafe_buffer` is valid UTF-8, every
+        span is in bounds, strings hold validated escaped JSON content, and
+        numbers follow RFC 8259 grammar.
         """
         unsafe_buffer.reserve(unsafe_buffer.byte_length() + BLOCK_WIDTH)
         self._input = unsafe_buffer^

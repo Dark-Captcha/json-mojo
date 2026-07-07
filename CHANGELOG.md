@@ -4,6 +4,15 @@ All notable changes to json-mojo. Format follows Keep a Changelog; versions foll
 
 ## [Unreleased]
 
+### Changed
+
+- Binary decoders (`msgpack`, `bson`, `cbor`) now build documents over a
+  JSON-valid arena for decoded string and number spans instead of retaining
+  arbitrary source-format bytes inside `Document` storage.
+- `json.tape` now provides shared arena helpers for alternate front-ends,
+  removing duplicated string escaping and number-span emission logic from the
+  binary decoders.
+
 ## [1.6.0] — 2026-07-06
 
 ### Added

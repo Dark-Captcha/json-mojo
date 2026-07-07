@@ -3,11 +3,9 @@
 # decoder — MessagePack bytes → the json-mojo six-kind tape (extension
 # tier 2, ARCHITECTURE.md). The decode loop is iterative (explicit frame
 # stack, hostile-input depth cap — msgpack is length-prefixed, so bombs are
-# cheap to write), and the output buffer is the APPENDED-TAIL pattern the
-# tier-2 contract describes: string spans point zero-copy into the input
-# where the bytes are already valid escaped-JSON content; everything the
-# tape must carry as text but the input does not contain (numbers, strings
-# needing JSON escaping) is rendered once past the input's end.
+# cheap to write), and the document buffer is a JSON-valid arena: decoded
+# strings and rendered numbers are copied into that arena, and tape spans
+# never point into arbitrary MessagePack framing bytes.
 #
 # Type policy (stated, per the tier-2 rule that the six tape tags never
 # grow): map keys must be strings; `bin`, `ext`, and non-finite floats are
@@ -20,31 +18,16 @@
 # identical diet.
 
 from json.tape import (
-    FLAG_ESCAPED,
     TAG_ARRAY,
     TAG_BOOLEAN,
     TAG_NULL,
-    TAG_NUMBER,
     TAG_OBJECT,
-    TAG_STRING,
+    append_number_span,
+    append_string_span,
     make_word0,
-    validate_utf8_span,
 )
 from json.document import Document
 from json.serializer import Serializer
-
-# Local byte constants — a front-end defines its own alphabet rather than
-# importing json's internals (the tier-2 rule: `json.tape` and the public
-# surfaces only).
-comptime _B_QUOTE: UInt8 = UInt8(0x22)  # "
-comptime _B_BSLASH: UInt8 = UInt8(0x5C)  # backslash
-comptime _B_CONTROL_MAX: UInt8 = UInt8(0x20)
-comptime _CTRL_BS: UInt8 = UInt8(0x08)  # \b
-comptime _CTRL_TAB: UInt8 = UInt8(0x09)  # \t
-comptime _CTRL_LF: UInt8 = UInt8(0x0A)  # \n
-comptime _CTRL_FF: UInt8 = UInt8(0x0C)  # \f
-comptime _CTRL_CR: UInt8 = UInt8(0x0D)  # \r
-
 
 comptime _MAX_DEPTH: Int = 1024
 
@@ -87,7 +70,6 @@ comptime _F_MAP32: UInt8 = UInt8(0xDF)
 comptime _NEG_FIXINT_LO: UInt8 = UInt8(0xE0)  # 0xe0–0xff
 comptime _FIXSTR_LEN: UInt8 = UInt8(0x1F)
 comptime _FIX_LEN: UInt8 = UInt8(0x0F)
-comptime _NIBBLE: UInt8 = UInt8(0x0F)
 
 
 struct _Frame(Copyable, Movable, TrivialRegisterPassable):
@@ -122,7 +104,7 @@ def decode(var bytes: List[UInt8]) raises -> Document:
         contains a MessagePack type with no JSON representation.
     """
     var length = len(bytes)
-    var tail = String("")  # rendered numbers + re-escaped strings
+    var arena = String("")  # JSON-valid string and number spans
     var tape = List[UInt64](capacity=16)
     var stack = List[_Frame]()
     var pos = 0
@@ -159,14 +141,14 @@ def decode(var bytes: List[UInt8]) raises -> Document:
                 _error("map keys must be strings (policy)", pos)
 
         if b <= _POS_FIXINT_MAX:  # positive fixint
-            pos = _emit_int(tape, tail, length, pos, 1, Int64(b))
+            pos = _emit_int(tape, arena, pos, 1, Int64(b))
             value_completed = True
         elif b >= _NEG_FIXINT_LO:  # negative fixint
-            pos = _emit_int(tape, tail, length, pos, 1, Int64(b) - 256)
+            pos = _emit_int(tape, arena, pos, 1, Int64(b) - 256)
             value_completed = True
         elif b >= _FIXSTR_LO and b <= _FIXSTR_HI:  # fixstr
             pos = _emit_str(
-                bytes, pos, 1, Int(b & _FIXSTR_LEN), tape, tail, length
+                bytes, pos, 1, Int(b & _FIXSTR_LEN), tape, arena, length
             )
             value_completed = True
         elif b >= _FIXMAP_LO and b <= _FIXMAP_HI:  # fixmap
@@ -188,50 +170,50 @@ def decode(var bytes: List[UInt8]) raises -> Document:
         elif b == _F_FLOAT32:  # float32
             var bits32 = UInt32(_be(bytes, pos + 1, 4, length))
             var f32 = UnsafePointer[UInt32](to=bits32).bitcast[Float32]()[]
-            pos = _emit_float(tape, tail, length, pos, 5, Float64(f32))
+            pos = _emit_float(tape, arena, pos, 5, Float64(f32))
             value_completed = True
         elif b == _F_FLOAT64:  # float64
             var bits64 = _be(bytes, pos + 1, 8, length)
             var f64 = UnsafePointer[UInt64](to=bits64).bitcast[Float64]()[]
-            pos = _emit_float(tape, tail, length, pos, 9, f64)
+            pos = _emit_float(tape, arena, pos, 9, f64)
             value_completed = True
         elif b == _F_UINT8:  # uint8
             pos = _emit_uint(
-                tape, tail, length, pos, 2, _be(bytes, pos + 1, 1, length)
+                tape, arena, pos, 2, _be(bytes, pos + 1, 1, length)
             )
             value_completed = True
         elif b == _F_UINT16:  # uint16
             pos = _emit_uint(
-                tape, tail, length, pos, 3, _be(bytes, pos + 1, 2, length)
+                tape, arena, pos, 3, _be(bytes, pos + 1, 2, length)
             )
             value_completed = True
         elif b == _F_UINT32:  # uint32
             pos = _emit_uint(
-                tape, tail, length, pos, 5, _be(bytes, pos + 1, 4, length)
+                tape, arena, pos, 5, _be(bytes, pos + 1, 4, length)
             )
             value_completed = True
         elif b == _F_UINT64:  # uint64
             pos = _emit_uint(
-                tape, tail, length, pos, 9, _be(bytes, pos + 1, 8, length)
+                tape, arena, pos, 9, _be(bytes, pos + 1, 8, length)
             )
             value_completed = True
         elif b == _F_INT8:  # int8
             var v8 = Int64(_be(bytes, pos + 1, 1, length))
             if v8 >= 128:
                 v8 -= 256
-            pos = _emit_int(tape, tail, length, pos, 2, v8)
+            pos = _emit_int(tape, arena, pos, 2, v8)
             value_completed = True
         elif b == _F_INT16:  # int16
             var v16 = Int64(_be(bytes, pos + 1, 2, length))
             if v16 >= (1 << 15):
                 v16 -= 1 << 16
-            pos = _emit_int(tape, tail, length, pos, 3, v16)
+            pos = _emit_int(tape, arena, pos, 3, v16)
             value_completed = True
         elif b == _F_INT32:  # int32
             var v32 = Int64(_be(bytes, pos + 1, 4, length))
             if v32 >= (1 << 31):
                 v32 -= 1 << 32
-            pos = _emit_int(tape, tail, length, pos, 5, v32)
+            pos = _emit_int(tape, arena, pos, 5, v32)
             value_completed = True
         elif b == _F_INT64:  # int64
             var bits = _be(bytes, pos + 1, 8, length)
@@ -243,19 +225,19 @@ def decode(var bytes: List[UInt8]) raises -> Document:
                     v64 = -Int64(~bits + 1)
             else:
                 v64 = Int64(bits)
-            pos = _emit_int(tape, tail, length, pos, 9, v64)
+            pos = _emit_int(tape, arena, pos, 9, v64)
             value_completed = True
         elif b == _F_STR8:  # str8
             var n8 = Int(_be(bytes, pos + 1, 1, length))
-            pos = _emit_str(bytes, pos, 2, n8, tape, tail, length)
+            pos = _emit_str(bytes, pos, 2, n8, tape, arena, length)
             value_completed = True
         elif b == _F_STR16:  # str16
             var n16 = Int(_be(bytes, pos + 1, 2, length))
-            pos = _emit_str(bytes, pos, 3, n16, tape, tail, length)
+            pos = _emit_str(bytes, pos, 3, n16, tape, arena, length)
             value_completed = True
         elif b == _F_STR32:  # str32
             var n32 = Int(_be(bytes, pos + 1, 4, length))
-            pos = _emit_str(bytes, pos, 5, n32, tape, tail, length)
+            pos = _emit_str(bytes, pos, 5, n32, tape, arena, length)
             value_completed = True
         elif b == _F_ARRAY16:  # array16
             pos = _open(
@@ -301,9 +283,7 @@ def decode(var bytes: List[UInt8]) raises -> Document:
     if len(tape) == 0:
         _error("no value in input", 0)
 
-    var buffer = String(unsafe_from_utf8=bytes)
-    buffer += tail
-    return Document(unsafe_buffer=buffer^, unsafe_tape=tape^)
+    return Document(unsafe_buffer=arena^, unsafe_tape=tape^)
 
 
 # --- Emission helpers --------------------------------------------------------------
@@ -347,44 +327,33 @@ def _open(
 
 def _emit_int(
     mut tape: List[UInt64],
-    mut tail: String,
-    input_length: Int,
+    mut arena: String,
     pos: Int,
     header: Int,
     value: Int64,
 ) raises -> Int:
     var serializer = Serializer(capacity_hint=24)
     serializer.write_int(value)
-    var text = serializer^.finish()
-    var start = input_length + tail.byte_length()
-    tail += text
-    tape.append(make_word0(TAG_NUMBER, UInt8(0), start))
-    tape.append(UInt64(input_length + tail.byte_length()))
+    append_number_span(tape, arena, serializer^.finish())
     return pos + header
 
 
 def _emit_uint(
     mut tape: List[UInt64],
-    mut tail: String,
-    input_length: Int,
+    mut arena: String,
     pos: Int,
     header: Int,
     value: UInt64,
 ) raises -> Int:
     var serializer = Serializer(capacity_hint=24)
     serializer.write_uint(value)
-    var text = serializer^.finish()
-    var start = input_length + tail.byte_length()
-    tail += text
-    tape.append(make_word0(TAG_NUMBER, UInt8(0), start))
-    tape.append(UInt64(input_length + tail.byte_length()))
+    append_number_span(tape, arena, serializer^.finish())
     return pos + header
 
 
 def _emit_float(
     mut tape: List[UInt64],
-    mut tail: String,
-    input_length: Int,
+    mut arena: String,
     pos: Int,
     header: Int,
     value: Float64,
@@ -396,11 +365,7 @@ def _emit_float(
         _ = serializer^.finish()
         _error("non-finite float is not representable in JSON (policy)", pos)
         return 0  # unreachable
-    var text = serializer^.finish()
-    var start = input_length + tail.byte_length()
-    tail += text
-    tape.append(make_word0(TAG_NUMBER, UInt8(0), start))
-    tape.append(UInt64(input_length + tail.byte_length()))
+    append_number_span(tape, arena, serializer^.finish())
     return pos + header
 
 
@@ -410,57 +375,11 @@ def _emit_str(
     header: Int,
     n: Int,
     mut tape: List[UInt64],
-    mut tail: String,
+    mut arena: String,
     input_length: Int,
 ) raises -> Int:
     var start = pos + header
     if start + n > input_length:
         _error("truncated string", pos)
-    validate_utf8_span(bytes, start, start + n)
-    # Clean bodies (no JSON escaping needed) are zero-copy spans into the
-    # input; dirty ones render escaped into the tail, marked FLAG_ESCAPED so
-    # decoded reads reverse the escaping.
-    var dirty = False
-    for i in range(start, start + n):
-        var c = bytes[i]
-        if c == _B_QUOTE or c == _B_BSLASH or c < _B_CONTROL_MAX:
-            dirty = True
-            break
-    if not dirty:
-        tape.append(make_word0(TAG_STRING, UInt8(0), start))
-        tape.append(UInt64(start + n))
-        return start + n
-    comptime HEX = "0123456789abcdef"
-    var hex_bytes = HEX.as_bytes()
-    var out_start = input_length + tail.byte_length()
-    # The re-escaped text accumulates as BYTES: escapes are ASCII and every
-    # other byte — including multibyte UTF-8 — passes through exactly.
-    # Building through `chr` would re-encode bytes >= 0x80 as two-byte code
-    # points and silently corrupt non-ASCII text.
-    var chunk = List[UInt8]()
-    for i in range(start, start + n):
-        var c = bytes[i]
-        if c == _B_QUOTE:
-            chunk.extend('\\"'.as_bytes())
-        elif c == _B_BSLASH:
-            chunk.extend("\\\\".as_bytes())
-        elif c == _CTRL_BS:
-            chunk.extend("\\b".as_bytes())
-        elif c == _CTRL_TAB:
-            chunk.extend("\\t".as_bytes())
-        elif c == _CTRL_LF:
-            chunk.extend("\\n".as_bytes())
-        elif c == _CTRL_FF:
-            chunk.extend("\\f".as_bytes())
-        elif c == _CTRL_CR:
-            chunk.extend("\\r".as_bytes())
-        elif c < _B_CONTROL_MAX:
-            chunk.extend("\\u00".as_bytes())
-            chunk.append(hex_bytes[Int((c >> UInt8(4)) & _NIBBLE)])
-            chunk.append(hex_bytes[Int(c & _NIBBLE)])
-        else:
-            chunk.append(c)
-    tail += String(unsafe_from_utf8=chunk)
-    tape.append(make_word0(TAG_STRING, FLAG_ESCAPED, out_start))
-    tape.append(UInt64(input_length + tail.byte_length()))
+    append_string_span(Span(bytes), tape, arena, start, start + n)
     return start + n

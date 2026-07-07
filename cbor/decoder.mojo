@@ -3,9 +3,9 @@
 # decoder — CBOR bytes → the json-mojo six-kind tape (extension tier 2,
 # RFC 8949). Iterative frame walk; definite AND indefinite arrays/maps
 # (the break byte closes; counts patch at close exactly like the JSON
-# parser's frames), indefinite TEXT strings concatenate their definite
-# chunks into the appended tail. float16/32/64 all decode (half-precision
-# expanded manually).
+# parser's frames), and JSON-valid arena storage for string and number spans.
+# Indefinite TEXT strings concatenate their definite chunks into one tape
+# string. float16/32/64 all decode (half-precision expanded manually).
 #
 # Type policy (stated; the six tape tags never grow): unsigned and negative
 # integers within Int64/UInt64, text strings, arrays, maps with text keys,
@@ -19,27 +19,15 @@ from json.tape import (
     TAG_ARRAY,
     TAG_BOOLEAN,
     TAG_NULL,
-    TAG_NUMBER,
     TAG_OBJECT,
     TAG_STRING,
+    append_number_span,
+    append_string_body,
+    append_string_span,
     make_word0,
-    validate_utf8_span,
 )
 from json.document import Document
 from json.serializer import Serializer
-
-# Local byte constants — a front-end defines its own alphabet rather than
-# importing json's internals (the tier-2 rule: `json.tape` and the public
-# surfaces only).
-comptime _B_QUOTE: UInt8 = UInt8(0x22)  # "
-comptime _B_BSLASH: UInt8 = UInt8(0x5C)  # backslash
-comptime _B_CONTROL_MAX: UInt8 = UInt8(0x20)
-comptime _CTRL_BS: UInt8 = UInt8(0x08)  # \b
-comptime _CTRL_TAB: UInt8 = UInt8(0x09)  # \t
-comptime _CTRL_LF: UInt8 = UInt8(0x0A)  # \n
-comptime _CTRL_FF: UInt8 = UInt8(0x0C)  # \f
-comptime _CTRL_CR: UInt8 = UInt8(0x0D)  # \r
-
 
 comptime _MAX_DEPTH: Int = 1024
 comptime _BREAK: UInt8 = UInt8(0xFF)
@@ -110,7 +98,7 @@ def decode(var bytes: List[UInt8]) raises -> Document:
         with no JSON representation.
     """
     var length = len(bytes)
-    var tail = String("")
+    var arena = String("")
     var tape = List[UInt64](capacity=16)
     var stack = List[_Frame]()
     var pos = 0
@@ -164,9 +152,9 @@ def decode(var bytes: List[UInt8]) raises -> Document:
             var v = _argument(bytes, pos, additional, length, next0)
             pos = next0
             if v > UInt64(Int64.MAX):
-                _emit_uint_text(tape, tail, length, v)
+                _emit_uint_text(tape, arena, v)
             else:
-                _emit_int_text(tape, tail, length, Int64(v))
+                _emit_int_text(tape, arena, Int64(v))
             value_completed = True
         elif major == UInt8(1):  # negative int: -1 - n
             var next1 = 0
@@ -179,12 +167,12 @@ def decode(var bytes: List[UInt8]) raises -> Document:
                     pos,
                 )
             var v1 = -1 - Int64(n)
-            _emit_int_text(tape, tail, length, v1)
+            _emit_int_text(tape, arena, v1)
             value_completed = True
         elif major == UInt8(2):
             _error("byte strings are not representable in JSON (policy)", pos)
         elif major == UInt8(3):  # text string
-            pos = _emit_text(bytes, tape, tail, length, pos, additional)
+            pos = _emit_text(bytes, tape, arena, length, pos, additional)
             value_completed = True
         elif major == UInt8(4) or major == UInt8(5):  # array / map
             var is_map = major == UInt8(5)
@@ -235,17 +223,17 @@ def decode(var bytes: List[UInt8]) raises -> Document:
                 _error("undefined is not representable in JSON (policy)", pos)
             elif additional == UInt8(25):  # float16
                 var h = _be(bytes, pos + 1, 2, length)
-                _emit_float(tape, tail, length, pos, _half_to_double(h))
+                _emit_float(tape, arena, pos, _half_to_double(h))
                 pos += 3
             elif additional == UInt8(26):  # float32
                 var b32 = UInt32(_be(bytes, pos + 1, 4, length))
                 var f32 = UnsafePointer[UInt32](to=b32).bitcast[Float32]()[]
-                _emit_float(tape, tail, length, pos, Float64(f32))
+                _emit_float(tape, arena, pos, Float64(f32))
                 pos += 5
             elif additional == UInt8(27):  # float64
                 var b64 = _be(bytes, pos + 1, 8, length)
                 var f64 = UnsafePointer[UInt64](to=b64).bitcast[Float64]()[]
-                _emit_float(tape, tail, length, pos, f64)
+                _emit_float(tape, arena, pos, f64)
                 pos += 9
             else:
                 _error(
@@ -264,9 +252,7 @@ def decode(var bytes: List[UInt8]) raises -> Document:
     if len(tape) == 0:
         _error("no value in input", 0)
 
-    var buffer = String(unsafe_from_utf8=bytes)
-    buffer += tail
-    return Document(unsafe_buffer=buffer^, unsafe_tape=tape^)
+    return Document(unsafe_buffer=arena^, unsafe_tape=tape^)
 
 
 def _close_frame(mut tape: List[UInt64], mut stack: List[_Frame]):
@@ -324,26 +310,23 @@ def _be(bytes: List[UInt8], start: Int, n: Int, length: Int) raises -> UInt64:
     return v
 
 
-def _emit_int_text(
-    mut tape: List[UInt64], mut tail: String, input_length: Int, v: Int64
-) raises:
+def _emit_int_text(mut tape: List[UInt64], mut arena: String, v: Int64) raises:
     var s = Serializer(capacity_hint=24)
     s.write_int(v)
-    _append_number(tape, tail, input_length, s^.finish())
+    append_number_span(tape, arena, s^.finish())
 
 
 def _emit_uint_text(
-    mut tape: List[UInt64], mut tail: String, input_length: Int, v: UInt64
+    mut tape: List[UInt64], mut arena: String, v: UInt64
 ) raises:
     var s = Serializer(capacity_hint=24)
     s.write_uint(v)
-    _append_number(tape, tail, input_length, s^.finish())
+    append_number_span(tape, arena, s^.finish())
 
 
 def _emit_float(
     mut tape: List[UInt64],
-    mut tail: String,
-    input_length: Int,
+    mut arena: String,
     pos: Int,
     v: Float64,
 ) raises:
@@ -354,39 +337,31 @@ def _emit_float(
         _ = s^.finish()
         _error("non-finite float is not representable in JSON (policy)", pos)
         return
-    _append_number(tape, tail, input_length, s^.finish())
-
-
-def _append_number(
-    mut tape: List[UInt64], mut tail: String, input_length: Int, text: String
-):
-    var start = input_length + tail.byte_length()
-    tail += text
-    tape.append(make_word0(TAG_NUMBER, UInt8(0), start))
-    tape.append(UInt64(input_length + tail.byte_length()))
+    append_number_span(tape, arena, s^.finish())
 
 
 def _emit_text(
     bytes: List[UInt8],
     mut tape: List[UInt64],
-    mut tail: String,
+    mut arena: String,
     input_length: Int,
     pos: Int,
     additional: UInt8,
 ) raises -> Int:
-    """A text string — definite (zero-copy span where clean) or indefinite
-    (definite chunks concatenated into the tail, RFC 8949 §3.2.3)."""
+    """A text string — definite or indefinite. Indefinite text emits one
+    string entry whose body is the concatenation of its definite chunks
+    (RFC 8949 §3.2.3)."""
     if additional != UInt8(31):
         var start = 0
         var n = Int(_argument(bytes, pos, additional, input_length, start))
         if start + n > input_length:
             _error("truncated text string", pos)
-        _emit_text_span(bytes, tape, tail, input_length, start, start + n)
+        _emit_text_span(bytes, tape, arena, start, start + n)
         return start + n
     # Indefinite: chunks must be DEFINITE text strings; break ends it.
     var scan = pos + 1
-    var out_start = input_length + tail.byte_length()
-    var any_bytes = False
+    var out_start = arena.byte_length()
+    var flags = UInt8(0)
     while True:
         if scan >= input_length:
             _error("unterminated indefinite text string", pos)
@@ -402,71 +377,19 @@ def _emit_text(
         )
         if cstart + n > input_length:
             _error("truncated text chunk", scan)
-        validate_utf8_span(bytes, cstart, cstart + n)
-        _escape_into_tail(bytes, tail, cstart, cstart + n)
-        any_bytes = True
+        if append_string_body(Span(bytes), arena, cstart, cstart + n):
+            flags = FLAG_ESCAPED
         scan = cstart + n
-    _ = any_bytes
-    tape.append(make_word0(TAG_STRING, FLAG_ESCAPED, out_start))
-    tape.append(UInt64(input_length + tail.byte_length()))
+    tape.append(make_word0(TAG_STRING, flags, out_start))
+    tape.append(UInt64(arena.byte_length()))
     return scan
 
 
 def _emit_text_span(
     bytes: List[UInt8],
     mut tape: List[UInt64],
-    mut tail: String,
-    input_length: Int,
+    mut arena: String,
     start: Int,
     end: Int,
 ) raises:
-    validate_utf8_span(bytes, start, end)
-    var dirty = False
-    for i in range(start, end):
-        var c = bytes[i]
-        if c == _B_QUOTE or c == _B_BSLASH or c < _B_CONTROL_MAX:
-            dirty = True
-            break
-    if not dirty:
-        tape.append(make_word0(TAG_STRING, UInt8(0), start))
-        tape.append(UInt64(end))
-        return
-    var out_start = input_length + tail.byte_length()
-    _escape_into_tail(bytes, tail, start, end)
-    tape.append(make_word0(TAG_STRING, FLAG_ESCAPED, out_start))
-    tape.append(UInt64(input_length + tail.byte_length()))
-
-
-def _escape_into_tail(
-    bytes: List[UInt8], mut tail: String, start: Int, end: Int
-):
-    comptime HEX = "0123456789abcdef"
-    var hex_bytes = HEX.as_bytes()
-    # The re-escaped text accumulates as BYTES: escapes are ASCII and every
-    # other byte — including multibyte UTF-8 — passes through exactly.
-    # Building through `chr` would re-encode bytes >= 0x80 as two-byte code
-    # points and silently corrupt non-ASCII text.
-    var chunk = List[UInt8]()
-    for i in range(start, end):
-        var c = bytes[i]
-        if c == _B_QUOTE:
-            chunk.extend('\\"'.as_bytes())
-        elif c == _B_BSLASH:
-            chunk.extend("\\\\".as_bytes())
-        elif c == _CTRL_BS:
-            chunk.extend("\\b".as_bytes())
-        elif c == _CTRL_TAB:
-            chunk.extend("\\t".as_bytes())
-        elif c == _CTRL_LF:
-            chunk.extend("\\n".as_bytes())
-        elif c == _CTRL_FF:
-            chunk.extend("\\f".as_bytes())
-        elif c == _CTRL_CR:
-            chunk.extend("\\r".as_bytes())
-        elif c < _B_CONTROL_MAX:
-            chunk.extend("\\u00".as_bytes())
-            chunk.append(hex_bytes[Int((c >> UInt8(4)) & UInt8(0x0F))])
-            chunk.append(hex_bytes[Int(c & UInt8(0x0F))])
-        else:
-            chunk.append(c)
-    tail += String(unsafe_from_utf8=chunk)
+    append_string_span(Span(bytes), tape, arena, start, end)

@@ -2,8 +2,8 @@
 
 # decoder — BSON bytes → the json-mojo six-kind tape (extension tier 2,
 # bsonspec.org v1.1). Iterative frame walk (documents carry their byte
-# length up front; the trailing 0x00 closes each), appended-tail pattern for
-# rendered number text and re-escaped strings, hostile-input depth cap.
+# length up front; the trailing 0x00 closes each), JSON-valid arena storage
+# for string and number spans, hostile-input depth cap.
 #
 # Type policy (stated; the six tape tags never grow): double (0x01, finite
 # only), string (0x02), document (0x03), array (0x04 — element order is
@@ -14,31 +14,16 @@
 # name: mapping them into JSON is a caller decision, never a silent one.
 
 from json.tape import (
-    FLAG_ESCAPED,
     TAG_ARRAY,
     TAG_BOOLEAN,
     TAG_NULL,
-    TAG_NUMBER,
     TAG_OBJECT,
-    TAG_STRING,
+    append_number_span,
+    append_string_span,
     make_word0,
-    validate_utf8_span,
 )
 from json.document import Document
 from json.serializer import Serializer
-
-# Local byte constants — a front-end defines its own alphabet rather than
-# importing json's internals (the tier-2 rule: `json.tape` and the public
-# surfaces only).
-comptime _B_QUOTE: UInt8 = UInt8(0x22)  # "
-comptime _B_BSLASH: UInt8 = UInt8(0x5C)  # backslash
-comptime _B_CONTROL_MAX: UInt8 = UInt8(0x20)
-comptime _CTRL_BS: UInt8 = UInt8(0x08)  # \b
-comptime _CTRL_TAB: UInt8 = UInt8(0x09)  # \t
-comptime _CTRL_LF: UInt8 = UInt8(0x0A)  # \n
-comptime _CTRL_FF: UInt8 = UInt8(0x0C)  # \f
-comptime _CTRL_CR: UInt8 = UInt8(0x0D)  # \r
-
 
 comptime _MAX_DEPTH: Int = 1024
 
@@ -125,7 +110,7 @@ def decode(var bytes: List[UInt8]) raises -> Document:
         BSON type has no JSON representation.
     """
     var length = len(bytes)
-    var tail = String("")
+    var arena = String("")
     var tape = List[UInt64](capacity=16)
     var stack = List[_Frame]()
 
@@ -171,7 +156,7 @@ def decode(var bytes: List[UInt8]) raises -> Document:
         var name_end = pos
         pos += 1
         if not stack[len(stack) - 1].is_array:
-            _emit_string_span(bytes, tape, tail, length, name_start, name_end)
+            _emit_string_span(bytes, tape, arena, name_start, name_end)
         # (array index names are read and dropped — order is authoritative)
 
         if element_type == _T_DOUBLE:
@@ -181,7 +166,7 @@ def decode(var bytes: List[UInt8]) raises -> Document:
                 _error("non-finite double is not representable in JSON", pos)
             var s = Serializer(capacity_hint=32)
             s.write_float(f)
-            _append_number_text(tape, tail, length, s^.finish())
+            append_number_span(tape, arena, s^.finish())
             pos += 8
         elif element_type == _T_STRING:
             var slen = _le32(bytes, pos, length)  # includes trailing 0x00
@@ -191,7 +176,7 @@ def decode(var bytes: List[UInt8]) raises -> Document:
             var s_end = s_start + slen - 1
             if bytes[s_end] != UInt8(0x00):
                 _error("string missing its trailing 0x00", s_end)
-            _emit_string_span(bytes, tape, tail, length, s_start, s_end)
+            _emit_string_span(bytes, tape, arena, s_start, s_end)
             stack[len(stack) - 1].count += 1
             pos = s_end + 1
             continue
@@ -237,13 +222,13 @@ def decode(var bytes: List[UInt8]) raises -> Document:
                 v32 -= 1 << 32
             var s32 = Serializer(capacity_hint=16)
             s32.write_int(Int64(v32))
-            _append_number_text(tape, tail, length, s32^.finish())
+            append_number_span(tape, arena, s32^.finish())
             pos += 4
         elif element_type == _T_INT64:
             var v64 = _u64_to_i64(_le64(bytes, pos, length))
             var s64 = Serializer(capacity_hint=24)
             s64.write_int(v64)
-            _append_number_text(tape, tail, length, s64^.finish())
+            append_number_span(tape, arena, s64^.finish())
             pos += 8
         elif element_type == _T_BINARY:
             _error("binary is not representable in JSON (policy)", pos)
@@ -274,72 +259,15 @@ def decode(var bytes: List[UInt8]) raises -> Document:
     if pos != length:
         _error("trailing bytes after the document", pos)
 
-    var buffer = String(unsafe_from_utf8=bytes)
-    buffer += tail
-    return Document(unsafe_buffer=buffer^, unsafe_tape=tape^)
-
-
-def _append_number_text(
-    mut tape: List[UInt64], mut tail: String, input_length: Int, text: String
-):
-    var start = input_length + tail.byte_length()
-    tail += text
-    tape.append(make_word0(TAG_NUMBER, UInt8(0), start))
-    tape.append(UInt64(input_length + tail.byte_length()))
+    return Document(unsafe_buffer=arena^, unsafe_tape=tape^)
 
 
 def _emit_string_span(
     bytes: List[UInt8],
     mut tape: List[UInt64],
-    mut tail: String,
-    input_length: Int,
+    mut arena: String,
     start: Int,
     end: Int,
 ) raises:
-    """UTF-8-validate a BSON string/name span; clean content is a zero-copy
-    span into the input, content needing JSON escaping renders into the
-    tail (the msgpack sibling's exact pattern)."""
-    validate_utf8_span(bytes, start, end)
-    var dirty = False
-    for i in range(start, end):
-        var c = bytes[i]
-        if c == _B_QUOTE or c == _B_BSLASH or c < _B_CONTROL_MAX:
-            dirty = True
-            break
-    if not dirty:
-        tape.append(make_word0(TAG_STRING, UInt8(0), start))
-        tape.append(UInt64(end))
-        return
-    comptime HEX = "0123456789abcdef"
-    var hex_bytes = HEX.as_bytes()
-    var out_start = input_length + tail.byte_length()
-    # The re-escaped text accumulates as BYTES: escapes are ASCII and every
-    # other byte — including multibyte UTF-8 — passes through exactly.
-    # Building through `chr` would re-encode bytes >= 0x80 as two-byte code
-    # points and silently corrupt non-ASCII text.
-    var chunk = List[UInt8]()
-    for i in range(start, end):
-        var c = bytes[i]
-        if c == _B_QUOTE:
-            chunk.extend('\\"'.as_bytes())
-        elif c == _B_BSLASH:
-            chunk.extend("\\\\".as_bytes())
-        elif c == _CTRL_BS:
-            chunk.extend("\\b".as_bytes())
-        elif c == _CTRL_TAB:
-            chunk.extend("\\t".as_bytes())
-        elif c == _CTRL_LF:
-            chunk.extend("\\n".as_bytes())
-        elif c == _CTRL_FF:
-            chunk.extend("\\f".as_bytes())
-        elif c == _CTRL_CR:
-            chunk.extend("\\r".as_bytes())
-        elif c < _B_CONTROL_MAX:
-            chunk.extend("\\u00".as_bytes())
-            chunk.append(hex_bytes[Int((c >> UInt8(4)) & UInt8(0x0F))])
-            chunk.append(hex_bytes[Int(c & UInt8(0x0F))])
-        else:
-            chunk.append(c)
-    tail += String(unsafe_from_utf8=chunk)
-    tape.append(make_word0(TAG_STRING, FLAG_ESCAPED, out_start))
-    tape.append(UInt64(input_length + tail.byte_length()))
+    """Append one BSON string or name span to the document's JSON arena."""
+    append_string_span(Span(bytes), tape, arena, start, end)

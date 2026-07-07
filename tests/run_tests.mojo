@@ -35,6 +35,9 @@ from json.options import (
 )
 from json.serializer import Serializer, dumps
 from json.value import ValueKind
+from bson import decode as bson_decode
+from cbor import decode as cbor_decode
+from msgpack import decode as msgpack_decode
 
 
 def _assert(condition: Bool, message: String) raises:
@@ -1169,6 +1172,66 @@ def test_file_load_dump() raises:
     _assert(dumps(back) == dumps(doc), "file round-trip is byte-faithful")
 
 
+def test_binary_decoders_use_json_valid_arenas() raises:
+    var mp = List[UInt8]()
+    mp.append(UInt8(0xA2))  # fixstr, length 2
+    mp.append(UInt8(ord("h")))
+    mp.append(UInt8(ord("i")))
+    var mp_doc = msgpack_decode(mp^)
+    _assert(mp_doc._input == "hi", "msgpack document arena excludes tag byte")
+    _assert(dumps(mp_doc) == '"hi"', "msgpack arena still dumps correctly")
+
+    var bson = List[UInt8]()
+    # {"a": "hi"} as one BSON document. The decoded arena should contain
+    # only JSON string spans ("a" + "hi"), not BSON length/type/NUL bytes.
+    for b in [
+        15,
+        0,
+        0,
+        0,
+        0x02,
+        ord("a"),
+        0,
+        3,
+        0,
+        0,
+        0,
+        ord("h"),
+        ord("i"),
+        0,
+        0,
+    ]:
+        bson.append(UInt8(b))
+    var bson_doc = bson_decode(bson^)
+    _assert(bson_doc._input == "ahi", "bson arena holds key and value text")
+    _assert(dumps(bson_doc) == '{"a":"hi"}', "bson arena dumps correctly")
+
+    var cbor = List[UInt8]()
+    cbor.append(UInt8(0x62))  # text, length 2
+    cbor.append(UInt8(ord("h")))
+    cbor.append(UInt8(ord("i")))
+    var cbor_doc = cbor_decode(cbor^)
+    _assert(cbor_doc._input == "hi", "cbor arena excludes type byte")
+    _assert(dumps(cbor_doc) == '"hi"', "cbor arena dumps correctly")
+
+    var cbor_indef = List[UInt8]()
+    cbor_indef.append(UInt8(0x7F))  # indefinite text
+    cbor_indef.append(UInt8(0x61))
+    cbor_indef.append(UInt8(ord("h")))
+    cbor_indef.append(UInt8(0x61))
+    cbor_indef.append(UInt8(ord("i")))
+    cbor_indef.append(UInt8(0xFF))
+    var cbor_indef_doc = cbor_decode(cbor_indef^)
+    _assert(
+        cbor_indef_doc._input == "hi",
+        "cbor indefinite text concatenates into one arena string",
+    )
+    _assert(
+        dumps(cbor_indef_doc) == '"hi"',
+        "cbor indefinite text dumps as one string",
+    )
+
+
 struct AllOptional(Copyable, Defaultable, Movable):
     var x: Optional[Int64]
     var y: Optional[String]
@@ -1521,6 +1584,16 @@ def main() raises:
         print("  PASS test_file_load_dump")
     except error:
         print("  FAIL test_file_load_dump:", String(error))
+        failures += 1
+
+    try:
+        test_binary_decoders_use_json_valid_arenas()
+        print("  PASS test_binary_decoders_use_json_valid_arenas")
+    except error:
+        print(
+            "  FAIL test_binary_decoders_use_json_valid_arenas:",
+            String(error),
+        )
         failures += 1
 
     if failures == 0:

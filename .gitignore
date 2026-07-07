@@ -2,6 +2,9 @@
 .pixi/*
 !.pixi/config.toml
 
+# python bytecode from generators and probes
+__pycache__/
+
 # third-party reference clones (not part of the release)
 references/json/
 references/EmberJson/
