@@ -1,6 +1,6 @@
 # Architecture — json-mojo
 
-> **Version:** 1.6.0 | **Updated:** 2026-07-06
+> **Version:** 1.6.0 | **Updated:** 2026-07-07
 
 Purpose, binding contracts, and system map of json-mojo — the criteria every structural decision in this library is judged against.
 
@@ -14,10 +14,11 @@ Purpose, binding contracts, and system map of json-mojo — the criteria every s
 | 4   | [Performance Promise](#performance-promise)                     |
 | 5   | [Type Scheme](#type-scheme)                                     |
 | 6   | [Public Surface](#public-surface)                               |
-| 7   | [Non-Goals and Extension Paths](#non-goals-and-extension-paths) |
-| 8   | [Open Decisions](#open-decisions)                               |
-| 9   | [Standards](#standards)                                         |
-| 10  | [System Map](#system-map)                                       |
+| 7   | [Runtime Model](#runtime-model)                                 |
+| 8   | [Non-Goals and Extension Paths](#non-goals-and-extension-paths) |
+| 9   | [Open Decisions](#open-decisions)                               |
+| 10  | [Standards](#standards)                                         |
+| 11  | [System Map](#system-map)                                       |
 
 ---
 
@@ -238,14 +239,32 @@ Multi-protocol support must never tax the strict path. Two mechanisms carry that
 
 ---
 
+## Runtime Model
+
+The core is synchronous, in-memory, and CPU-bound by design. `parse`/`loads`/`loads_bytes`, `dumps`, typed serde, patching, and the binary front-ends all consume owned buffers and return owned results; none starts tasks, reads ambient runtime state, or owns a worker pool. That keeps cancellation, scheduling, and backpressure with the application or framework that already owns the socket, file descriptor, queue, or request deadline.
+
+| Work class            | Ruling                                                                                                                                                                                                                     |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Single document parse | Stay synchronous. The hot path is SIMD indexing plus deterministic tape construction; adding `async` would add a scheduling contract without removing CPU work.                                                            |
+| File helpers          | `load(path)` and `dump(doc, path)` are explicit blocking sugar for scripts and tests. Async services should perform file/network I/O in their own runtime and call `loads_bytes` / `dumps` at the boundary.                |
+| Batch throughput      | Parallelism belongs above the single-document core: shard independent documents across a caller-owned worker pool or `std.algorithm.parallelize` site with explicit worker counts and result aggregation.                  |
+| Raising work          | Do not hide parse or serde errors inside generic parallel helpers unless error propagation is proven on the current Mojo toolchain. A trap is not an acceptable substitute for a `raises` path in a data library.          |
+| Shared state          | The library has none. `Document` owns its buffer and tape; `Value` borrows them; `Serializer` owns its output. Sharing across tasks is a caller decision and must preserve those ownership/lifetime boundaries.            |
+| Async adapters        | If Mojo grows a stable async I/O ecosystem around packages, adapters should be thin and separate: await bytes outside this package, then call the same synchronous core. No hidden spawning, unbounded queues, or globals. |
+
+This is the Rust-style split in Mojo terms: async orchestrates I/O and cancellation; CPU parsing and serialization stay explicit, bounded, and measurable.
+
+---
+
 ## Non-Goals and Extension Paths
 
-| Excluded                                | Reason                                                                 | Belongs to                                                                        |
-| --------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Query engine (JSONPath, RFC 9535)       | Selection expressions are a language of their own                      | A library that builds on this one                                                 |
-| Schema validation                       | A constraint language above the data layer                             | A library that builds on this one                                                 |
-| Native Windows package target           | Mojo is currently installed on Windows through WSL, not native `win-*` | Add when upstream `mojo` packages and a supported runner exist for native Windows |
-| Additional binary foreign-type mappings | BSON/CBOR/MessagePack can encode data outside JSON's six-kind alphabet | Explicit opt-in policy knobs; never a silent default                              |
+| Excluded                                | Reason                                                                                | Belongs to                                                                        |
+| --------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Query engine (JSONPath, RFC 9535)       | Selection expressions are a language of their own                                     | A library that builds on this one                                                 |
+| Schema validation                       | A constraint language above the data layer                                            | A library that builds on this one                                                 |
+| Native Windows package target           | Mojo is currently installed on Windows through WSL, not native `win-*`                | Add when upstream `mojo` packages and a supported runner exist for native Windows |
+| Additional binary foreign-type mappings | BSON/CBOR/MessagePack can encode data outside JSON's six-kind alphabet                | Explicit opt-in policy knobs; never a silent default                              |
+| Built-in async I/O runtime              | Runtime ownership, cancellation, deadlines, and backpressure are application concerns | Thin adapters above `loads_bytes` / `dumps`, after Mojo async I/O APIs settle     |
 
 Struct binding, JSON Lines/RFC 7464 I/O, JSON5, RFC 6902/RFC 7396 patches, and the three binary siblings are now settled in scope and shipped.
 
@@ -258,6 +277,7 @@ Non-goals are rulings on the v1 core, not locked doors. Each class of exclusion 
 | 1    | Grammar supersets — JSON5, comments, trailing commas | `dialect: Dialect` values on the parse-options parameter: branches erase at compile time, so the strict path pays zero when a dialect is off       | Reserve the comptime options parameter in the v1 signature (policy knobs only), so the `dialect` field never breaks a caller |
 | 2    | Different wire formats — BSON, CBOR, MessagePack     | Sibling front-end libraries that decode into this library's tape — every consumer (`Value`, `to[T]`, serde, serialization) works on them unchanged | Treat the tape layout and `Value` API as a stable, documented contract — not a private detail                                |
 | 3    | Document operations — JSONPath, Patch, Schema        | Independent libraries consuming the public `Value` surface like any other caller                                                                   | Nothing — the public API is already the extension point                                                                      |
+| 4    | Async I/O integration                                | Runtime-specific wrappers that await bytes and delegate to the synchronous core                                                                    | Keep the core pure and owned-buffer based, with no hidden scheduling or global workers                                       |
 
 ---
 

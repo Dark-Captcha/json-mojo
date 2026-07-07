@@ -1,6 +1,6 @@
 # json-mojo
 
-> **Version:** 1.6.0 | **Updated:** 2026-07-06
+> **Version:** 1.6.0 | **Updated:** 2026-07-07
 
 Spec-exact, SIMD-accelerated JSON for Mojo — a lazy tape engine with Python-easy verbs, zero dependencies, and a measured performance record.
 
@@ -38,11 +38,12 @@ print(dumps(data))                      # byte-faithful re-emission
 | 1   | [Why](#why)                                 |
 | 2   | [Install](#install)                         |
 | 3   | [Surface](#surface)                         |
-| 4   | [Verification Record](#verification-record) |
-| 5   | [Performance](#performance)                 |
-| 6   | [Limits](#limits)                           |
-| 7   | [Documents](#documents)                     |
-| 8   | [License](#license)                         |
+| 4   | [Runtime Model](#runtime-model)             |
+| 5   | [Verification Record](#verification-record) |
+| 6   | [Performance](#performance)                 |
+| 7   | [Limits](#limits)                           |
+| 8   | [Documents](#documents)                     |
+| 9   | [License](#license)                         |
 
 ---
 
@@ -119,6 +120,14 @@ Numbers are lossless raw text on the tape — a 300-digit integer round-trips ex
 
 ---
 
+## Runtime Model
+
+The core is synchronous and CPU-bound. It owns input buffers, builds a tape, and returns owned results; it does not own a task runtime, worker pool, queue, timeout, or cancellation policy.
+
+Use async at the I/O edge: await network/file bytes in your framework, then call `loads_bytes` / `dumps`. For batch throughput, shard independent documents across a caller-owned worker pool with explicit bounds. `load` and `dump` are blocking convenience helpers for scripts and tests, not hidden async I/O.
+
+---
+
 ## Verification Record
 
 Every release re-earns all of it (`pixi run test` plus `pixi run verify`;
@@ -133,7 +142,7 @@ commands in PERF.md, Reproducing):
 | `dumps ∘ loads` idempotence                 | 95/95 corpus files, byte-exact (part of the suite gate's RESULT line)         |
 | json5-tests (Dialect.JSON5)                 | 112 accept+reject cases / **0 failures**                                      |
 | MessagePack vectors (generated)             | 37 accept / 5 float / 14 reject — 0 failures                                  |
-| Unit battery                                | 40 / 40                                                                       |
+| Unit battery                                | 44 / 44                                                                       |
 
 ---
 

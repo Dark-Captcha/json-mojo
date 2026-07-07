@@ -22,6 +22,7 @@
 - Preserve ownership on every raising path; consume partially initialized containers before propagating errors.
 - Add focused tests for success, malformed input, limits, recursive composition, and cleanup paths.
 - Performance claims require same-machine measurements and cannot weaken conformance.
+- Keep the core synchronous and CPU-bound. Async belongs at the caller-owned I/O boundary; do not add hidden task spawning, global worker pools, or unbounded queues.
 - Do not add platform claims that CI and the Pixi lock do not exercise.
 
 ## Contributions

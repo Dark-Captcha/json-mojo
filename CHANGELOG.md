@@ -12,6 +12,9 @@ All notable changes to json-mojo. Format follows Keep a Changelog; versions foll
 - `json.tape` now provides shared arena helpers for alternate front-ends,
   removing duplicated string escaping and number-span emission logic from the
   binary decoders.
+- README, architecture, and agent instructions now state the sync/async
+  boundary explicitly: async I/O belongs outside the package, while parsing,
+  serialization, serde, and binary transcoding remain synchronous CPU work.
 
 ## [1.6.0] — 2026-07-06
 
